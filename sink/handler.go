@@ -58,7 +58,6 @@ func LoadCursorFromFile(logger *zap.Logger, cursorFilePath string) *sink.Cursor 
 type flushRequest struct {
 	blockNumber uint64
 	cursor      *sink.Cursor
-	resultChan  chan error
 }
 
 type Handler struct {
@@ -80,6 +79,7 @@ type Handler struct {
 	// Async flush fields
 	flushQueue      chan *flushRequest
 	flushWorkerDone chan struct{}
+	flushError      chan error // for errors coming from the database, when something gets through, the world stops
 	shutdown        chan struct{}
 }
 
@@ -119,6 +119,12 @@ func NewSinker(typeUrl string, store store.ForkawareStore, logger *zap.Logger, c
 }
 
 func (h *Handler) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsrpc.BlockScopedData, isLive *bool, cursor *sink.Cursor) error {
+	select {
+	case err := <-h.flushError:
+		return fmt.Errorf("error during last flush: %w", err)
+	default:
+	}
+
 	var entriesCount int
 
 	// Process data if present
@@ -143,13 +149,26 @@ func (h *Handler) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsr
 	req := &flushRequest{
 		blockNumber: lib,
 		cursor:      cursor,
-		resultChan:  make(chan error, 1),
 	}
+
+	if !h.shouldFlush() {
+		return nil
+	}
+
+	// here we do the flushing
+	//
+	batch, size := h.GetPendingBatchAndReset(data.Clock.Number)
+
+	// send the batch to the queue
+	_ = batch
+	_ = size // for logging or metrics ?
 
 	select {
 	case h.flushQueue <- req:
 		// Request queued successfully
 		FlushQueueDepth.SetUint64(uint64(len(h.flushQueue)))
+	case err := <-h.flushError:
+		return fmt.Errorf("error during last flush: %w", err)
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
@@ -161,6 +180,8 @@ func (h *Handler) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsr
 
 		// Block until we can queue the request or context is cancelled
 		select {
+		case err := <-h.flushError:
+			return fmt.Errorf("error during last flush: %w", err)
 		case h.flushQueue <- req:
 			FlushQueueDepth.SetUint64(uint64(len(h.flushQueue)))
 		case <-ctx.Done():
@@ -168,15 +189,15 @@ func (h *Handler) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsr
 		}
 	}
 
-	// Wait for flush to complete
-	select {
-	case err := <-req.resultChan:
-		if err != nil {
-			return fmt.Errorf("flushing data up to block %d: %w", lib, err)
-		}
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	//	// Wait for flush to complete
+	//	select {
+	//	case err := <-req.resultChan:
+	//		if err != nil {
+	//			return fmt.Errorf("flushing data up to block %d: %w", lib, err)
+	//		}
+	//	case <-ctx.Done():
+	//		return ctx.Err()
+	//	}
 
 	blockNum := data.GetClock().Number
 	RecordBlockProcessing(entriesCount, blockNum)
@@ -204,75 +225,69 @@ func (h *Handler) addToBatch(entries []*pbstore.Entry, blockNumber uint64) error
 	// Add entries to batch buffer
 	h.batchBuffer = append(h.batchBuffer, entries...)
 	h.batchSizeBytes += newBytes
-
-	// Start timer on first entry if not already started
-	if len(h.batchBuffer) == len(entries) {
-		h.batchStartTime = time.Now()
-		if h.batchTimer != nil {
-			h.batchTimer.Stop()
-		}
-		h.batchTimer = time.AfterFunc(h.maxBatchTime, func() {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			if len(h.batchBuffer) > 0 {
-				h.logger.Debug("Flushing batch due to timeout",
-					zap.Duration("elapsed", time.Since(h.batchStartTime)),
-					zap.Int("entries", len(h.batchBuffer)))
-				_ = h.flushBatchLocked(blockNumber)
-			}
-		})
-	}
-
-	if len(h.batchBuffer) >= h.batchSize ||
-		h.batchSizeBytes >= h.maxBatchBytes {
-		return h.flushBatchLocked(blockNumber)
-	}
-
-	return nil
 }
 
-func (h *Handler) flushBatchLocked(blockNumber uint64) error {
-	if len(h.batchBuffer) == 0 {
+func (h *Handler) shouldFlush() bool {
+
+	//// Start timer on first entry if not already started
+	//if len(h.batchBuffer) == len(entries) {
+	//	h.batchStartTime = time.Now()
+	//	if h.batchTimer != nil {
+	//		h.batchTimer.Stop()
+	//	}
+	//	h.batchTimer = time.AfterFunc(h.maxBatchTime, func() {
+	//		h.mu.Lock()
+	//		defer h.mu.Unlock()
+	//		if len(h.batchBuffer) > 0 {
+	//			h.logger.Debug("Flushing batch due to timeout",
+	//				zap.Duration("elapsed", time.Since(h.batchStartTime)),
+	//				zap.Int("entries", len(h.batchBuffer)))
+	//			_ = h.flushBatchLocked(blockNumber)
+	//		}
+	//	})
+	//}
+
+	return h.batchSizeBytes >= h.maxBatchBytes //  || time.Since(h.batchStartTime) > h.maxBatchTime
+	//if len(h.batchBuffer) >= h.batchSize ||
+	//	h.batchSizeBytes >= h.maxBatchBytes {
+	//	return h.flushBatchLocked(blockNumber)
+	//}
+
+	//return nil
+}
+
+func (h *Handler) FlushBatch(blockNumber uint64, batch []*pbstore.Entry) error {
+	if len(batch) == 0 {
 		return nil
 	}
 
 	setAllStart := time.Now()
 
-	// Create a copy of the buffer to send to store
-	batchToFlush := make([]*pbstore.Entry, len(h.batchBuffer))
-	copy(batchToFlush, h.batchBuffer)
-	flushedBytes := h.batchSizeBytes
-
-	// Reset batch state
-	h.batchBuffer = h.batchBuffer[:0]
-	h.batchSizeBytes = 0
-	if h.batchTimer != nil {
-		h.batchTimer.Stop()
-		h.batchTimer = nil
-	}
-
-	h.mu.Unlock()
-	defer h.mu.Lock()
-
 	// Perform the actual store operation
-	if err := h.store.SetAll(batchToFlush, blockNumber); err != nil {
+	if err := h.store.SetAll(batch, blockNumber); err != nil {
 		return fmt.Errorf("setting foundational-store batch: %w", err)
 	}
 
 	StoreSetAllDuration.ObserveDuration(time.Since(setAllStart))
 	h.logger.Debug("Flushed batch to store",
-		zap.Int("batch_size", len(batchToFlush)),
-		zap.Int("batch_bytes", flushedBytes),
+		zap.Int("batch_size", len(batch)),
 		zap.Uint64("block_number", blockNumber))
 
 	return nil
 }
 
-func (h *Handler) FlushPendingBatch(blockNumber uint64) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// GetPendingBatchAndReset returns the pending batch and its size in bytes, then resets the h.batchBuffer and h.batchSize on the Handler
+func (h *Handler) GetPendingBatchAndReset(blockNumber uint64) ([]*pbstore.Entry, int) {
+	batchBuffer := h.batchBuffer
+	batchSize := h.batchSizeBytes
+	h.batchBuffer = make([]*pbstore.Entry, 0)
+	h.batchSize = 0
+	if h.batchTimer != nil {
+		h.batchTimer.Stop()
+	}
+	h.batchTimer = nil
 
-	return h.flushBatchLocked(blockNumber)
+	return batchBuffer, batchSize
 }
 
 func (h *Handler) Close() error {
@@ -344,8 +359,8 @@ func (h *Handler) flushWorker() {
 				h.logger.Error("Failed to flush to database",
 					zap.Uint64("block", req.blockNumber),
 					zap.Error(err))
-				req.resultChan <- err
-				continue
+				h.flushError <- err
+				return
 			}
 
 			// After successful flush, save the cursor
@@ -355,14 +370,11 @@ func (h *Handler) flushWorker() {
 				h.logger.Error("Failed to save cursor after flush",
 					zap.Uint64("block", req.blockNumber),
 					zap.Error(err))
-				req.resultChan <- err
-				continue
+				h.flushError <- err
+				return
 			}
 
 			AsyncFlushDuration.ObserveDuration(time.Since(asyncFlushStart))
-
-			// success
-			req.resultChan <- nil
 
 		case <-h.shutdown:
 			h.logger.Info("Flush worker shutting down")
