@@ -6,46 +6,124 @@ import (
 	pbstore "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/v1"
 )
 
-// addToBatch adds entries to the batch buffer with proper synchronization
-func (h *Handler) addToBatch(entries []*pbstore.Entry) error {
-	var newBytes int
-	for _, entry := range entries {
-		newBytes += len(entry.Key) + len(entry.Value.Value)
+// batchWorker runs as single writer for all batch operations (lock-free)
+func (h *Handler) batchWorker() {
+	defer close(h.batchWorkerDone)
+
+	for {
+		select {
+		case op := <-h.batchOp:
+			result := h.processBatchOperation(op)
+			op.resultChan <- result
+
+		case <-h.shutdown:
+			return
+		}
 	}
-
-	h.batchMutex.Lock()
-	defer h.batchMutex.Unlock()
-
-	// Add entries to batch buffer
-	h.batchBuffer = append(h.batchBuffer, entries...)
-	h.batchSizeBytes += newBytes
-
-	// Start timer on first entry if not already started
-	if len(h.batchBuffer) == len(entries) {
-		h.batchStartTime = time.Now()
-	}
-
-	return nil
 }
 
+// processBatchOperation handles batch operations in single-writer context (no locks needed)
+func (h *Handler) processBatchOperation(op *batchOperation) *batchResult {
+	result := &batchResult{}
 
-// GetPendingBatchAndReset returns the pending batch and its size in bytes, then resets the batch state
-func (h *Handler) GetPendingBatchAndReset(blockNumber uint64) ([]*pbstore.Entry, int) {
-	h.batchMutex.Lock()
-	defer h.batchMutex.Unlock()
+	if op.entries != nil {
+		// Add entries to batch
+		var newBytes int64
+		for _, entry := range op.entries {
+			newBytes += int64(len(entry.Key) + len(entry.Value.Value))
+		}
 
-	if len(h.batchBuffer) == 0 {
-		return nil, 0
+		h.batchBuffer = append(h.batchBuffer, op.entries...)
+		h.batchSizeBytes.Add(newBytes)
+		h.batchCount.Add(int32(len(op.entries)))
+
+		// Start timer on first entry if not already started
+		if len(h.batchBuffer) == len(op.entries) {
+			h.batchStartTime.Store(time.Now())
+		}
 	}
 
-	// take ownership of current batch buffer
-	batchBuffer := h.batchBuffer
-	batchBytes := h.batchSizeBytes
+	// Check if should flush single reader of own state
+	result.shouldFlush = h.shouldFlushInternal() || op.forceFlush
 
-	// Reset batch state with fresh slice (pre-allocate capacity)
-	h.batchBuffer = make([]*pbstore.Entry, 0, h.batchSize)
-	h.batchSizeBytes = 0
-	h.batchStartTime = time.Time{}
+	if result.shouldFlush && len(h.batchBuffer) > 0 {
+		// Get pending batch and reset
+		result.batch = h.batchBuffer
+		result.batchBytes = h.batchSizeBytes.Load()
 
-	return batchBuffer, batchBytes
+		// Reset
+		h.batchBuffer = make([]*pbstore.Entry, 0, h.batchSize)
+		h.batchSizeBytes.Store(0)
+		h.batchCount.Store(0)
+		h.batchStartTime.Store(time.Time{})
+	}
+
+	return result
+}
+
+// shouldFlushInternal checks flush conditions (called only from single writer)
+func (h *Handler) shouldFlushInternal() bool {
+	currentBytes := h.batchSizeBytes.Load()
+	currentCount := h.batchCount.Load()
+	startTimeValue := h.batchStartTime.Load()
+
+	var startTime time.Time
+	if startTimeValue != nil {
+		startTime = startTimeValue.(time.Time)
+	}
+
+	return int(currentCount) >= h.batchSize ||
+		currentBytes >= int64(h.maxBatchBytes) ||
+		(!startTime.IsZero() && time.Since(startTime) > h.maxBatchTime)
+}
+
+// addToBatch using single writer pattern
+func (h *Handler) addToBatch(entries []*pbstore.Entry) (*batchResult, error) {
+	op := &batchOperation{
+		entries:    entries,
+		forceFlush: false,
+		resultChan: make(chan *batchResult, 1),
+	}
+
+	// Send to single writer
+	h.batchOp <- op
+
+	// Wait for result
+	result := <-op.resultChan
+
+	return result, nil
+}
+
+// shouldFlush using atomic reads
+func (h *Handler) shouldFlush() bool {
+	// Fast atomic reads (no blocking)
+	currentBytes := h.batchSizeBytes.Load()
+	currentCount := h.batchCount.Load()
+	startTimeValue := h.batchStartTime.Load()
+
+	var startTime time.Time
+	if startTimeValue != nil {
+		startTime = startTimeValue.(time.Time)
+	}
+
+	return int(currentCount) >= h.batchSize ||
+		currentBytes >= int64(h.maxBatchBytes) ||
+		(!startTime.IsZero() && time.Since(startTime) > h.maxBatchTime)
+}
+
+// Lock-free GetPendingBatchAndReset using single writer pattern
+func (h *Handler) GetPendingBatchAndReset(blockNumber uint64) ([]*pbstore.Entry, int) {
+	op := &batchOperation{
+		entries:    nil,
+		forceFlush: true, // Force flush for manual calls
+		resultChan: make(chan *batchResult, 1),
+	}
+
+	// Send to single writer
+	h.batchOp <- op
+
+	// Wait for result
+	result := <-op.resultChan
+
+	return result.batch, int(result.batchBytes)
 }

@@ -16,15 +16,6 @@ type flushRequest struct {
 	batchBytes  int
 }
 
-// shouldFlush determines if the current batch should be flushed based on size, bytes, or time
-func (h *Handler) shouldFlush() bool {
-	h.batchMutex.Lock()
-	defer h.batchMutex.Unlock()
-
-	return len(h.batchBuffer) >= h.batchSize ||
-		h.batchSizeBytes >= h.maxBatchBytes ||
-		(h.batchStartTime != (time.Time{}) && time.Since(h.batchStartTime) > h.maxBatchTime)
-}
 
 // FlushPendingBatch forces a flush of any pending batch entries to the async queue
 func (h *Handler) FlushPendingBatch(blockNumber uint64) error {

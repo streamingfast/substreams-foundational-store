@@ -3,7 +3,7 @@ package sink
 import (
 	"context"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	pbstore "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/v1"
@@ -17,20 +17,37 @@ const (
 	DefaultFlushQueueSize = 100
 )
 
+// batchOperation represents an operation on the batch buffer
+type batchOperation struct {
+	entries    []*pbstore.Entry
+	forceFlush bool // Force flush even if conditions aren't met
+	resultChan chan *batchResult
+}
+
+type batchResult struct {
+	shouldFlush bool
+	batch       []*pbstore.Entry
+	batchBytes  int64
+}
+
 type Handler struct {
 	store          store.ForkawareStore
 	typeUrl        string
 	logger         *zap.Logger
 	cursorFilePath string
 
-	// Batching fields (protected by batchMutex)
-	batchMutex     sync.Mutex
-	batchBuffer    []*pbstore.Entry
+	// Batching fields - using single writer pattern with atomic counters
+	batchBuffer    []*pbstore.Entry // Only modified through single channel
 	batchSize      int
-	batchSizeBytes int
+	batchCount     atomic.Int32 // Atomic counter for entries
+	batchSizeBytes atomic.Int64 // Atomic counter for bytes
 	maxBatchTime   time.Duration
 	maxBatchBytes  int
-	batchStartTime time.Time
+	batchStartTime atomic.Value // Atomic value for time.Time
+
+	// Single writer coordination
+	batchOp         chan *batchOperation
+	batchWorkerDone chan struct{}
 
 	// Async flush fields
 	flushQueue      chan *flushRequest
@@ -62,14 +79,21 @@ func NewSinker(typeUrl string, store store.ForkawareStore, logger *zap.Logger, c
 		maxBatchTime:   maxBatchTime,
 		// this represents ~80% badger size
 		maxBatchBytes:   8 * 1024 * 1024,
-		batchSizeBytes:  0,
+		batchOp:         make(chan *batchOperation, 100),
+		batchWorkerDone: make(chan struct{}),
 		flushQueue:      make(chan *flushRequest, flushQueueSize),
 		flushWorkerDone: make(chan struct{}),
 		flushError:      make(chan error, 1),
 		shutdown:        make(chan struct{}),
 	}
 
-	// Start the flush worker
+	// Initialize atomic values
+	handler.batchCount.Store(0)
+	handler.batchSizeBytes.Store(0)
+	handler.batchStartTime.Store(time.Time{})
+
+	// Start workers
+	go handler.batchWorker()
 	go handler.flushWorker()
 
 	return handler
@@ -96,11 +120,35 @@ func (h *Handler) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsr
 		entriesCount = len(entries.Entries)
 
 		// Add entries to batch buffer instead of immediate insert
-		if err := h.addToBatch(entries.Entries); err != nil {
+		batchResult, err := h.addToBatch(entries.Entries)
+		if err != nil {
 			return fmt.Errorf("adding entries to batch: %w", err)
+		}
+
+		// If we should flush now, use the batch from the result
+		if batchResult.shouldFlush && len(batchResult.batch) > 0 {
+			lib := cursor.LIB.Num()
+
+			// Submit flush request to background worker with batch data
+			req := &flushRequest{
+				blockNumber: lib,
+				cursor:      cursor,
+				batch:       batchResult.batch,
+				batchBytes:  int(batchResult.batchBytes),
+			}
+
+			select {
+			case h.flushQueue <- req:
+				FlushQueueDepth.SetUint64(uint64(len(h.flushQueue)))
+			case err := <-h.flushError:
+				return fmt.Errorf("error during last flush: %w", err)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
 
+	// Always check for timeout-based flush even if no new entries
 	lib := cursor.LIB.Num()
 
 	if !h.shouldFlush() {
