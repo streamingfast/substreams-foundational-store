@@ -3,6 +3,7 @@ package sink
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/streamingfast/shutter"
@@ -30,6 +31,8 @@ type Sinker struct {
 	maxBatchTime   time.Duration
 	maxBatchBytes  int
 	batchStartTime time.Time
+
+	batchMutex sync.Mutex
 
 	// Flusher for async ops
 	flusher *Flusher

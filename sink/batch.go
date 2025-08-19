@@ -9,6 +9,8 @@ import (
 // addToBatch adds entries to the batch buffer with proper synchronization
 func (s *Sinker) addToBatch(entries []*pbstore.Entry) error {
 
+	s.batchMutex.Lock()
+
 	if len(s.batchBuffer) == 0 {
 		s.batchStartTime = time.Now()
 	}
@@ -22,13 +24,17 @@ func (s *Sinker) addToBatch(entries []*pbstore.Entry) error {
 	s.batchBuffer = append(s.batchBuffer, entries...)
 	s.batchSizeBytes += newBytes
 
+	s.batchMutex.Unlock()
 	return nil
 }
 
 // GetPendingBatchAndReset returns the pending batch and its size in bytes, then resets the batch state
 func (s *Sinker) GetPendingBatchAndReset(blockNumber uint64) ([]*pbstore.Entry, int) {
 
+	s.batchMutex.Lock()
+
 	if len(s.batchBuffer) == 0 {
+		s.batchMutex.Unlock()
 		return nil, 0
 	}
 
@@ -41,5 +47,6 @@ func (s *Sinker) GetPendingBatchAndReset(blockNumber uint64) ([]*pbstore.Entry, 
 	s.batchSizeBytes = 0
 	s.batchStartTime = time.Time{}
 
+	s.batchMutex.Unlock()
 	return batchBuffer, batchBytes
 }
