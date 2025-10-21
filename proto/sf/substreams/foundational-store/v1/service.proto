@@ -6,7 +6,7 @@ package sf.substreams.foundational_store.v1;
 
 option go_package = "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/v1;foundationalstorev1";
 
-// Store service provides access to foundational store data with fork-aware, 
+// Store service provides access to foundational store data with fork-aware,
 // block-versioned key-value operations. Designed for high-performance serving
 // of Substreams output data with blockchain reorganization support.
 service Store {
@@ -18,24 +18,40 @@ service Store {
 
 // Specifies which value to retrieve at a specific block
 message GetRequest {
+  // Block number for data retrieval
+  // Required for gRPC calls, specifies the exact block height for querying
+  // Must be left blank (0) for Substreams WASM intrinsics, runtime provides block context
   uint64 block_number = 1;
+
+  // Block hash for data retrieval
+  // Required for gRPC calls, ensures block identity and fork-awareness
+  // Must be left blank (empty) for Substreams WASM intrinsics, runtime provides block context
   bytes block_hash = 2;
+
   bool omit_deleted = 3;
   bytes key = 4;
 }
 
 // Contains the retrieved value and status
 message GetResponse {
-  ResponseCode response = 1;
-  // The stored value (only present when response = FOUND)
-  google.protobuf.Any value = 2;
   bool block_reached = 3;
+  ResponseCode code = 4;
+  // The stored value (only present when response = FOUND)
+  google.protobuf.Any value = 5;
 }
 
 // Specifies multiple values to retrieve at a specific block
 message GetAllRequest {
+  // Block number for data retrieval
+  // Required for gRPC calls, specifies the exact block height for querying
+  // Must be left blank (0) for Substreams WASM intrinsics, runtime provides block context
   uint64 block_number = 1;
+
+  // Block hash for data retrieval
+  // Required for gRPC calls, ensures block identity and fork-awareness
+  // Must be left blank (empty) for Substreams WASM intrinsics, runtime provides block context
   bytes block_hash = 2;
+
   bool omit_deleted = 3;
   repeated bytes keys = 4;
 }
@@ -62,15 +78,15 @@ enum ResponseCode {
   // Key does not exist at the requested block
   RESPONSE_CODE_NOT_FOUND = 2;
   // Key was deleted after finality (LIB) -> historical reference
-  RESPONSE_CODE_NOT_FOUND_FINALIZE = 3;
+  RESPONSE_CODE_NOT_FOUND_FINALIZE = 4;
   // Requested block number has not been processed yet (block_number > head_block)
-  RESPONSE_CODE_NOT_FOUND_BLOCK_NOT_REACHED = 4;
+  RESPONSE_CODE_NOT_FOUND_BLOCK_NOT_REACHED = 5;
 }
 
 // Represents a key-value pair in the store used for Substreams sink operations
 message Entry {
-  bytes key = 1;
-  google.protobuf.Any value = 2;
+  bytes key = 2;
+  google.protobuf.Any value = 4;
 }
 
 // Container for multiple key-value pairs, typically used as Substreams module output

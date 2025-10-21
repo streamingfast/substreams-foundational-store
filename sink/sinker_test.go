@@ -59,7 +59,7 @@ func (m *SimpleMockStore) SetAll(entries []*pbstore.Entry, blockNumber uint64) e
 }
 
 func (m *SimpleMockStore) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
-	return &pbstore.GetResponse{Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND}, nil
+	return &pbstore.GetResponse{Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND}, nil
 }
 
 func (m *SimpleMockStore) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse, error) {

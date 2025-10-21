@@ -42,7 +42,7 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 			// Track no keys found for this call
 			sink.DatabaseGetMisses.Inc()
 			return &pbstore.GetResponse{
-				Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+				Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 			}, nil
 		}
 		sink.DatabaseGetErrors.Inc()
@@ -54,7 +54,7 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 	sink.DatabaseGetHits.Inc()
 
 	return &pbstore.GetResponse{
-		Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+		Code: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
 		Value: &anypb.Any{
 			TypeUrl: s.typeUrl,
 			Value:   entry.Value,
@@ -100,7 +100,7 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 				append(out, &pbstore.ResponseEntry{
 					Key: key,
 					Response: &pbstore.GetResponse{
-						Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+						Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 						Value: &anypb.Any{
 							TypeUrl: s.typeUrl,
 							Value:   nil,
@@ -113,7 +113,7 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 		out = append(out, &pbstore.ResponseEntry{
 			Key: key,
 			Response: &pbstore.GetResponse{
-				Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+				Code: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
 				Value: &anypb.Any{
 					TypeUrl: s.typeUrl,
 					Value:   entry.Value,

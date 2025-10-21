@@ -105,7 +105,7 @@ This command connects to a gRPC server and retrieves a value for the specified k
 		fmt.Printf("Query time: %s\n", time.Since(start))
 
 		// Display the response
-		switch resp.Response {
+		switch resp.Code {
 		case pbStore.ResponseCode_RESPONSE_CODE_FOUND:
 			fmt.Printf("Type URL: %s\n", resp.Value.TypeUrl)
 			protoscopeOutput := protoscope.Write(resp.Value.Value, protoscope.WriterOptions{})
@@ -116,7 +116,7 @@ This command connects to a gRPC server and retrieves a value for the specified k
 		case pbStore.ResponseCode_RESPONSE_CODE_NOT_FOUND_FINALIZE:
 			fmt.Println("Value not found (finalized)")
 		default:
-			fmt.Printf("Unknown response code: %s\n", resp.Response)
+			fmt.Printf("Unknown response code: %s\n", resp.Code)
 		}
 
 		return nil

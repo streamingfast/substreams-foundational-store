@@ -98,8 +98,8 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 		// If the block number is <= the requested block number, return it
 		if cached.blockNumber <= request.BlockNumber {
 			return &pbstore.GetResponse{
-				Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
-				Value:    cached.entry.Value,
+				Code:  pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+				Value: cached.entry.Value,
 			}, nil
 		}
 	}
@@ -131,8 +131,8 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 				response.Entries = append(response.Entries, &pbstore.ResponseEntry{
 					Key: key,
 					Response: &pbstore.GetResponse{
-						Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
-						Value:    cached.entry.Value,
+						Code:  pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+						Value: cached.entry.Value,
 					},
 				})
 				continue

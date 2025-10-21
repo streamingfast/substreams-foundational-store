@@ -48,12 +48,12 @@ func (m *mockStore) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, erro
 	cached, ok := m.entries[string(request.Key)]
 	if !ok || cached.blockNumber > request.BlockNumber {
 		return &pbstore.GetResponse{
-			Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+			Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 		}, nil
 	}
 	return &pbstore.GetResponse{
-		Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
-		Value:    cached.entry.Value,
+		Code:  pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+		Value: cached.entry.Value,
 	}, nil
 }
 
@@ -67,15 +67,15 @@ func (m *mockStore) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllRespo
 			response.Entries = append(response.Entries, &pbstore.ResponseEntry{
 				Key: key,
 				Response: &pbstore.GetResponse{
-					Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+					Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 				},
 			})
 		} else {
 			response.Entries = append(response.Entries, &pbstore.ResponseEntry{
 				Key: key,
 				Response: &pbstore.GetResponse{
-					Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
-					Value:    cached.entry.Value,
+					Code:  pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+					Value: cached.entry.Value,
 				},
 			})
 		}
@@ -129,8 +129,8 @@ func TestCacheStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get entry1: %v", err)
 	}
-	if resp1.Response != pbstore.ResponseCode_RESPONSE_CODE_FOUND {
-		t.Errorf("Expected FOUND response for entry1, got %v", resp1.Response)
+	if resp1.Code != pbstore.ResponseCode_RESPONSE_CODE_FOUND {
+		t.Errorf("Expected FOUND response for entry1, got %v", resp1.Code)
 	}
 
 	// Flush entries with block numbers <= 200
@@ -172,8 +172,8 @@ func TestCacheStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get entry3: %v", err)
 	}
-	if resp3.Response != pbstore.ResponseCode_RESPONSE_CODE_FOUND {
-		t.Errorf("Expected FOUND response for entry3, got %v", resp3.Response)
+	if resp3.Code != pbstore.ResponseCode_RESPONSE_CODE_FOUND {
+		t.Errorf("Expected FOUND response for entry3, got %v", resp3.Code)
 	}
 	if string(resp3.Value.Value) != "value3" {
 		t.Errorf("Expected original value for entry3, got %s", string(resp3.Value.Value))

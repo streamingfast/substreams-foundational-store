@@ -81,7 +81,7 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 		// Track no keys found for this call
 		sink.DatabaseGetMisses.Inc()
 		return &pbstore.GetResponse{
-			Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+			Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 		}, nil
 	}
 
@@ -103,7 +103,7 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 
 	if request.BlockNumber < blockNumber {
 		return &pbstore.GetResponse{
-			Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+			Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 		}, nil
 	}
 
@@ -111,7 +111,7 @@ func (s *Store) Get(request *pbstore.GetRequest) (*pbstore.GetResponse, error) {
 	// as the setter does not store block hash information
 
 	return &pbstore.GetResponse{
-		Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+		Code: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
 		Value: &anypb.Any{
 			TypeUrl: s.typeUrl,
 			Value:   actualValue,
@@ -188,7 +188,7 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 								&pbstore.ResponseEntry{
 									Key: key,
 									Response: &pbstore.GetResponse{
-										Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+										Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 									},
 								})
 							mutex.Unlock()
@@ -227,7 +227,7 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 						entries = append(entries, &pbstore.ResponseEntry{
 							Key: key,
 							Response: &pbstore.GetResponse{
-								Response: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
+								Code: pbstore.ResponseCode_RESPONSE_CODE_NOT_FOUND,
 							},
 						})
 						mutex.Unlock()
@@ -243,7 +243,7 @@ func (s *Store) GetAll(request *pbstore.GetAllRequest) (*pbstore.GetAllResponse,
 						&pbstore.ResponseEntry{
 							Key: key,
 							Response: &pbstore.GetResponse{
-								Response: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
+								Code: pbstore.ResponseCode_RESPONSE_CODE_FOUND,
 								Value: &anypb.Any{
 									TypeUrl: s.typeUrl,
 									Value:   actualValue,
