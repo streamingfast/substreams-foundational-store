@@ -27,9 +27,13 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Store service provides access to foundational store data
+// Store service provides access to foundational store data with fork-aware,
+// block-versioned key-value operations. Designed for high-performance serving
+// of Substreams output data with blockchain reorganization support.
 type StoreClient interface {
+	// Get retrieves a single value by key at a specific block number
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
+	// GetAll retrieves multiple values by keys at a specific block number
 	GetAll(ctx context.Context, in *GetAllRequest, opts ...grpc.CallOption) (*GetAllResponse, error)
 }
 
@@ -65,9 +69,13 @@ func (c *storeClient) GetAll(ctx context.Context, in *GetAllRequest, opts ...grp
 // All implementations must embed UnimplementedStoreServer
 // for forward compatibility.
 //
-// Store service provides access to foundational store data
+// Store service provides access to foundational store data with fork-aware,
+// block-versioned key-value operations. Designed for high-performance serving
+// of Substreams output data with blockchain reorganization support.
 type StoreServer interface {
+	// Get retrieves a single value by key at a specific block number
 	Get(context.Context, *GetRequest) (*GetResponse, error)
+	// GetAll retrieves multiple values by keys at a specific block number
 	GetAll(context.Context, *GetAllRequest) (*GetAllResponse, error)
 	mustEmbedUnimplementedStoreServer()
 }
