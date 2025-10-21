@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - develop
+      - hotfix/nott
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -20,12 +21,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Install Go
         uses: actions/setup-go@v4
         with:
           go-version: 1.24.x
-      
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -34,20 +35,20 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      
+
       - name: Download Go dependencies
         run: go mod download
-      
+
       - name: Build Binary
         run: go build -o foundational-store ./cmd/foundational-store
-      
+
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Generate docker tags/labels from github build context
         id: meta
         uses: docker/metadata-action@v5
@@ -59,7 +60,7 @@ jobs:
             type=raw,enable=${{ github.ref == 'refs/heads/develop' }},value=develop
           flavor: |
             latest=${{ startsWith(github.ref, 'refs/tags/') }}
-      
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
