@@ -8,6 +8,7 @@ package pbservice
 
 import (
 	v2 "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
+	v21 "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	_ "google.golang.org/protobuf/types/known/anypb"
@@ -150,11 +151,94 @@ func (x *GetResponse) GetEntries() *v2.QueriedEntries {
 	return nil
 }
 
+// FlushRequest specifies the operations to flush to the store.
+type FlushRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The operations to apply to the store.
+	Operations    *v21.Operations `protobuf:"bytes,2,opt,name=operations,proto3" json:"operations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FlushRequest) Reset() {
+	*x = FlushRequest{}
+	mi := &file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FlushRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FlushRequest) ProtoMessage() {}
+
+func (x *FlushRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FlushRequest.ProtoReflect.Descriptor instead.
+func (*FlushRequest) Descriptor() ([]byte, []int) {
+	return file_sf_substreams_foundational_store_service_v2_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *FlushRequest) GetOperations() *v21.Operations {
+	if x != nil {
+		return x.Operations
+	}
+	return nil
+}
+
+// FlushResponse contains the result of a flush operation.
+type FlushResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FlushResponse) Reset() {
+	*x = FlushResponse{}
+	mi := &file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FlushResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FlushResponse) ProtoMessage() {}
+
+func (x *FlushResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FlushResponse.ProtoReflect.Descriptor instead.
+func (*FlushResponse) Descriptor() ([]byte, []int) {
+	return file_sf_substreams_foundational_store_service_v2_service_proto_rawDescGZIP(), []int{3}
+}
+
 var File_sf_substreams_foundational_store_service_v2_service_proto protoreflect.FileDescriptor
 
 const file_sf_substreams_foundational_store_service_v2_service_proto_rawDesc = "" +
 	"\n" +
-	"9sf/substreams/foundational-store/service/v2/service.proto\x12+sf.substreams.foundational_store.service.v2\x1a\x19google/protobuf/any.proto\x1a5sf/substreams/foundational-store/model/v2/model.proto\"\x92\x01\n" +
+	"9sf/substreams/foundational-store/service/v2/service.proto\x12+sf.substreams.foundational_store.service.v2\x1a\x19google/protobuf/any.proto\x1a5sf/substreams/foundational-store/model/v2/model.proto\x1a$sf/substreams/intern/v2/deltas.proto\"\x92\x01\n" +
 	"\n" +
 	"GetRequest\x12!\n" +
 	"\fblock_number\x18\x01 \x01(\x04R\vblockNumber\x12\x1d\n" +
@@ -163,10 +247,16 @@ const file_sf_substreams_foundational_store_service_v2_service_proto_rawDesc = "
 	"\x04keys\x18\x03 \x03(\v2..sf.substreams.foundational_store.model.v2.KeyR\x04keys\"\x87\x01\n" +
 	"\vGetResponse\x12#\n" +
 	"\rblock_reached\x18\x01 \x01(\bR\fblockReached\x12S\n" +
-	"\aentries\x18\x02 \x01(\v29.sf.substreams.foundational_store.model.v2.QueriedEntriesR\aentries2\x80\x02\n" +
+	"\aentries\x18\x02 \x01(\v29.sf.substreams.foundational_store.model.v2.QueriedEntriesR\aentries\"U\n" +
+	"\fFlushRequest\x12E\n" +
+	"\n" +
+	"operations\x18\x02 \x01(\v2%.sf.substreams.internal.v2.OperationsR\n" +
+	"operations\"\x0f\n" +
+	"\rFlushResponse2\x80\x03\n" +
 	"\x05Store\x12x\n" +
 	"\x03Get\x127.sf.substreams.foundational_store.service.v2.GetRequest\x1a8.sf.substreams.foundational_store.service.v2.GetResponse\x12}\n" +
-	"\bGetFirst\x127.sf.substreams.foundational_store.service.v2.GetRequest\x1a8.sf.substreams.foundational_store.service.v2.GetResponseB\xfd\x02\n" +
+	"\bGetFirst\x127.sf.substreams.foundational_store.service.v2.GetRequest\x1a8.sf.substreams.foundational_store.service.v2.GetResponse\x12~\n" +
+	"\x05Flush\x129.sf.substreams.foundational_store.service.v2.FlushRequest\x1a:.sf.substreams.foundational_store.service.v2.FlushResponseB\xfd\x02\n" +
 	"/com.sf.substreams.foundational_store.service.v2B\fServiceProtoP\x01Zogithub.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2;pbservice\xa2\x02\x04SSFS\xaa\x02*Sf.Substreams.FoundationalStore.Service.V2\xca\x02*Sf\\Substreams\\FoundationalStore\\Service\\V2\xe2\x026Sf\\Substreams\\FoundationalStore\\Service\\V2\\GPBMetadata\xea\x02.Sf::Substreams::FoundationalStore::Service::V2b\x06proto3"
 
 var (
@@ -181,25 +271,31 @@ func file_sf_substreams_foundational_store_service_v2_service_proto_rawDescGZIP(
 	return file_sf_substreams_foundational_store_service_v2_service_proto_rawDescData
 }
 
-var file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_sf_substreams_foundational_store_service_v2_service_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_sf_substreams_foundational_store_service_v2_service_proto_goTypes = []any{
 	(*GetRequest)(nil),        // 0: sf.substreams.foundational_store.service.v2.GetRequest
 	(*GetResponse)(nil),       // 1: sf.substreams.foundational_store.service.v2.GetResponse
-	(*v2.Key)(nil),            // 2: sf.substreams.foundational_store.model.v2.Key
-	(*v2.QueriedEntries)(nil), // 3: sf.substreams.foundational_store.model.v2.QueriedEntries
+	(*FlushRequest)(nil),      // 2: sf.substreams.foundational_store.service.v2.FlushRequest
+	(*FlushResponse)(nil),     // 3: sf.substreams.foundational_store.service.v2.FlushResponse
+	(*v2.Key)(nil),            // 4: sf.substreams.foundational_store.model.v2.Key
+	(*v2.QueriedEntries)(nil), // 5: sf.substreams.foundational_store.model.v2.QueriedEntries
+	(*v21.Operations)(nil),    // 6: sf.substreams.internal.v2.Operations
 }
 var file_sf_substreams_foundational_store_service_v2_service_proto_depIdxs = []int32{
-	2, // 0: sf.substreams.foundational_store.service.v2.GetRequest.keys:type_name -> sf.substreams.foundational_store.model.v2.Key
-	3, // 1: sf.substreams.foundational_store.service.v2.GetResponse.entries:type_name -> sf.substreams.foundational_store.model.v2.QueriedEntries
-	0, // 2: sf.substreams.foundational_store.service.v2.Store.Get:input_type -> sf.substreams.foundational_store.service.v2.GetRequest
-	0, // 3: sf.substreams.foundational_store.service.v2.Store.GetFirst:input_type -> sf.substreams.foundational_store.service.v2.GetRequest
-	1, // 4: sf.substreams.foundational_store.service.v2.Store.Get:output_type -> sf.substreams.foundational_store.service.v2.GetResponse
-	1, // 5: sf.substreams.foundational_store.service.v2.Store.GetFirst:output_type -> sf.substreams.foundational_store.service.v2.GetResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: sf.substreams.foundational_store.service.v2.GetRequest.keys:type_name -> sf.substreams.foundational_store.model.v2.Key
+	5, // 1: sf.substreams.foundational_store.service.v2.GetResponse.entries:type_name -> sf.substreams.foundational_store.model.v2.QueriedEntries
+	6, // 2: sf.substreams.foundational_store.service.v2.FlushRequest.operations:type_name -> sf.substreams.internal.v2.Operations
+	0, // 3: sf.substreams.foundational_store.service.v2.Store.Get:input_type -> sf.substreams.foundational_store.service.v2.GetRequest
+	0, // 4: sf.substreams.foundational_store.service.v2.Store.GetFirst:input_type -> sf.substreams.foundational_store.service.v2.GetRequest
+	2, // 5: sf.substreams.foundational_store.service.v2.Store.Flush:input_type -> sf.substreams.foundational_store.service.v2.FlushRequest
+	1, // 6: sf.substreams.foundational_store.service.v2.Store.Get:output_type -> sf.substreams.foundational_store.service.v2.GetResponse
+	1, // 7: sf.substreams.foundational_store.service.v2.Store.GetFirst:output_type -> sf.substreams.foundational_store.service.v2.GetResponse
+	3, // 8: sf.substreams.foundational_store.service.v2.Store.Flush:output_type -> sf.substreams.foundational_store.service.v2.FlushResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sf_substreams_foundational_store_service_v2_service_proto_init() }
@@ -213,7 +309,7 @@ func file_sf_substreams_foundational_store_service_v2_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sf_substreams_foundational_store_service_v2_service_proto_rawDesc), len(file_sf_substreams_foundational_store_service_v2_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

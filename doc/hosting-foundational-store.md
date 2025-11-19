@@ -52,7 +52,7 @@ Start the server with your Substreams module as the data source:
 
 **Configuration Options:**
 
-- `--dsn`: Storage backend (Badger: `badger:///path`, PostgreSQL: `postgres://user:pass@host/db`)
+- `--dsn`: Storage backend (Badger: `badger:///path`)
 - `--type-url`: Protobuf type URL for stored values
 - `--manifest-path`: Path to your Substreams manifest
 - `--output-module-name`: Name of the output module in your Substreams

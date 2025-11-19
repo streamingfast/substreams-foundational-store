@@ -10,6 +10,7 @@ import (
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
+	pbssinternal "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2"
 	pbsubstreamsrpc "github.com/streamingfast/substreams/pb/sf/substreams/rpc/v2"
 	pbsubstreams "github.com/streamingfast/substreams/pb/sf/substreams/v1"
 	sink "github.com/streamingfast/substreams/sink"
@@ -90,6 +91,11 @@ func (m *SimpleMockStore) EvictUpToBlock(upToBlockNumber uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.evictCalls = append(m.evictCalls, upToBlockNumber)
+	return nil
+}
+
+func (m *SimpleMockStore) ApplyOperations(operations []*pbssinternal.Operation, blockNumber uint64) error {
+	// Simple implementation for testing - just ignore operations
 	return nil
 }
 

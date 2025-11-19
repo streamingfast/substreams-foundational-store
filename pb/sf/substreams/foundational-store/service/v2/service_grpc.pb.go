@@ -25,9 +25,11 @@ type StoreClient interface {
 	// Get retrieves one or more values from the store at a specific block.
 	// Returns entries for all requested keys, with appropriate status codes for missing keys.
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
-	// GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested key.
+	// GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested`  key.
 	// Useful for range queries and finding the next key in sorted order.
 	GetFirst(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
+	// Flush processes operations to update the store state.
+	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 }
 
 type storeClient struct {
@@ -56,6 +58,15 @@ func (c *storeClient) GetFirst(ctx context.Context, in *GetRequest, opts ...grpc
 	return out, nil
 }
 
+func (c *storeClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
+	out := new(FlushResponse)
+	err := c.cc.Invoke(ctx, "/sf.substreams.foundational_store.service.v2.Store/Flush", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StoreServer is the server API for Store service.
 // All implementations must embed UnimplementedStoreServer
 // for forward compatibility
@@ -63,9 +74,11 @@ type StoreServer interface {
 	// Get retrieves one or more values from the store at a specific block.
 	// Returns entries for all requested keys, with appropriate status codes for missing keys.
 	Get(context.Context, *GetRequest) (*GetResponse, error)
-	// GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested key.
+	// GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested`  key.
 	// Useful for range queries and finding the next key in sorted order.
 	GetFirst(context.Context, *GetRequest) (*GetResponse, error)
+	// Flush processes operations to update the store state.
+	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
 	mustEmbedUnimplementedStoreServer()
 }
 
@@ -78,6 +91,9 @@ func (UnimplementedStoreServer) Get(context.Context, *GetRequest) (*GetResponse,
 }
 func (UnimplementedStoreServer) GetFirst(context.Context, *GetRequest) (*GetResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetFirst not implemented")
+}
+func (UnimplementedStoreServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
 }
 func (UnimplementedStoreServer) mustEmbedUnimplementedStoreServer() {}
 
@@ -128,6 +144,24 @@ func _Store_GetFirst_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Store_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlushRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoreServer).Flush(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sf.substreams.foundational_store.service.v2.Store/Flush",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoreServer).Flush(ctx, req.(*FlushRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Store_ServiceDesc is the grpc.ServiceDesc for Store service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -142,6 +176,10 @@ var Store_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFirst",
 			Handler:    _Store_GetFirst_Handler,
+		},
+		{
+			MethodName: "Flush",
+			Handler:    _Store_Flush_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

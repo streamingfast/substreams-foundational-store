@@ -13,8 +13,11 @@ import (
 	pbstore "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v1"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
+	pbssinternal "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // StoreServer implements the StoreKV gRPC service
@@ -95,6 +98,39 @@ func (s *GrpcServer) GetFirst(ctx context.Context, req *pbservice.GetRequest) (*
 		zap.Bool("keep", false),
 	)
 	return r, nil
+}
+
+// Flush implements the Flush method of the Store service
+func (s *GrpcServer) Flush(ctx context.Context, req *pbservice.FlushRequest) (*pbservice.FlushResponse, error) {
+	// Convert operations to entries
+	var entries []*pbmodel.Entry
+	for _, op := range req.Operations.Operations {
+		if op.Type == pbssinternal.Operation_SET {
+			// op.Value is the marshaled Any
+			value := &anypb.Any{}
+			if err := proto.Unmarshal(op.Value, value); err != nil {
+				return nil, fmt.Errorf("unmarshaling operation value: %w", err)
+			}
+			entry := &pbmodel.Entry{
+				Key:   &pbmodel.Key{Bytes: []byte(op.Key)},
+				Value: value,
+			}
+			entries = append(entries, entry)
+		}
+		// Handle other types if needed
+	}
+
+	// Use ord as block number, assume all same
+	blockNumber := uint64(0)
+	if len(req.Operations.Operations) > 0 {
+		blockNumber = req.Operations.Operations[0].Ord
+	}
+
+	if err := s.store.SetAll(entries, false, blockNumber); err != nil {
+		return nil, fmt.Errorf("setting entries from flush: %w", err)
+	}
+
+	return &pbservice.FlushResponse{}, nil
 }
 
 func (s *GrpcServer) Run(addr string, opts ...grpc.ServerOption) {

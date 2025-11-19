@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - v2 protobuf definitions for improved foundational store API (sf.substreams.foundational_store.service.v2 and sf.substreams.foundational_store.model.v2)
 - Comprehensive documentation comments to all proto files in the proto/ directory
-- Unit tests for the IfNotExist feature across all store implementations (badger, badger_time_traversal, postgres, postgres_time_traversal)
+- Unit tests for the IfNotExist feature across all store implementations (badger, badger_time_traversal)
 - Deprecation notices for proto service v1 with prominent warnings and migration guidance
 
 ### Fixed

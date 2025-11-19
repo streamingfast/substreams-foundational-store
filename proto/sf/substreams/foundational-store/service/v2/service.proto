@@ -3,6 +3,7 @@ syntax = "proto3";
 import "google/protobuf/any.proto";
 
 import "sf/substreams/foundational-store/model/v2/model.proto";
+import "sf/substreams/intern/v2/deltas.proto";
 
 package sf.substreams.foundational_store.service.v2;
 
@@ -18,6 +19,8 @@ service Store {
   // GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested`  key.
   // Useful for range queries and finding the next key in sorted order.
   rpc GetFirst(GetRequest) returns (GetResponse);
+  // Flush processes operations to update the store state.
+  rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
 // GetRequest specifies the parameters for retrieving values from the store.
@@ -45,3 +48,12 @@ message GetResponse {
   // Each entry corresponds to one of the keys in the request, in the same order.
   model.v2.QueriedEntries entries = 2;
 }
+
+// FlushRequest specifies the operations to flush to the store.
+message FlushRequest {
+  // The operations to apply to the store.
+  sf.substreams.internal.v2.Operations operations = 2;
+}
+
+// FlushResponse contains the result of a flush operation.
+message FlushResponse {}

@@ -25,8 +25,6 @@ type DSN struct {
 }
 
 var driverMap = map[string]string{
-	"psql":       "postgres",
-	"postgres":   "postgres",
 	"clickhouse": "clickhouse",
 	"bigtable":   "bigtable",
 	"badger":     "badger",

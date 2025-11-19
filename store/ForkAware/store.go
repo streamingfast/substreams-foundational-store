@@ -7,6 +7,7 @@ import (
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
+	pbssinternal "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2"
 )
 
 type cachedEntry struct {
@@ -138,6 +139,11 @@ func (s *Store) GetFirst(request *pbservice.GetRequest) (*pbservice.GetResponse,
 		}
 	}
 	return resp, nil
+}
+
+// ApplyOperations applies operations to the wrapped store
+func (s *Store) ApplyOperations(operations []*pbssinternal.Operation, blockNumber uint64) error {
+	return s.wrapped.ApplyOperations(operations, blockNumber)
 }
 
 // FlushUpToBlock flushes all entries with block numbers <= blockNum to the wrapped foundational-store.

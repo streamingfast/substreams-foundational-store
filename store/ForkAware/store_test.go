@@ -5,6 +5,7 @@ import (
 
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
+	pbssinternal "github.com/streamingfast/substreams/pb/sf/substreams/intern/v2"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -164,6 +165,11 @@ func (m *mockStore) GetFirst(request *pbservice.GetRequest) (*pbservice.GetRespo
 		}
 	}
 	return &pbservice.GetResponse{Entries: &pbmodel.QueriedEntries{Entries: entries}}, nil
+}
+
+func (m *mockStore) ApplyOperations(operations []*pbssinternal.Operation, blockNumber uint64) error {
+	// Simple implementation for testing - just ignore operations
+	return nil
 }
 
 func TestCacheStore(t *testing.T) {

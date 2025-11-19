@@ -17,9 +17,6 @@ import (
 	"github.com/streamingfast/substreams-foundational-store/store"
 	"github.com/streamingfast/substreams-foundational-store/store/ForkAware"
 	"github.com/streamingfast/substreams-foundational-store/store/badger"
-	"github.com/streamingfast/substreams-foundational-store/store/badger_time_traversal"
-	"github.com/streamingfast/substreams-foundational-store/store/postgres"
-	"github.com/streamingfast/substreams-foundational-store/store/postgres_time_traversal"
 	"go.uber.org/zap"
 	grpcclient "google.golang.org/grpc"
 
@@ -76,39 +73,13 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 
 	switch dsn.Driver() {
 	case "badger":
-		if noTimeTraversal {
-			// Use original badger store implementation
-			badgerStore, err := badger.NewStore(dsn, serverTypeUrl, serverWorkers, zlog)
-			if err != nil {
-				return fmt.Errorf("failed to create Badger foundational-store: %w", err)
-			}
-			defer badgerStore.Close()
-			baseStore = badgerStore
-		} else {
-			// Use time traversal badger store implementation (default)
-			badgerTimeTraversalStore, err := badger_time_traversal.NewStore(dsn, serverTypeUrl, serverWorkers, zlog)
-			if err != nil {
-				return fmt.Errorf("failed to create Badger time traversal foundational-store: %w", err)
-			}
-			defer badgerTimeTraversalStore.Close()
-			baseStore = badgerTimeTraversalStore
+		// Use unified badger store with time traversal flag
+		badgerStore, err := badger.NewStore(dsn, serverTypeUrl, serverWorkers, zlog, !noTimeTraversal)
+		if err != nil {
+			return fmt.Errorf("failed to create Badger foundational-store: %w", err)
 		}
-	case "postgres":
-		if noTimeTraversal {
-			// Use original postgres store implementation
-			pgStore, err := postgres.NewStore(dsn, serverTypeUrl)
-			if err != nil {
-				return fmt.Errorf("failed to create Postgres foundational-store: %w", err)
-			}
-			baseStore = pgStore
-		} else {
-			// Use time traversal postgres store implementation (default)
-			pgTimeTraversalStore, err := postgres_time_traversal.NewStore(dsn, serverTypeUrl)
-			if err != nil {
-				return fmt.Errorf("failed to create Postgres time traversal foundational-store: %w", err)
-			}
-			baseStore = pgTimeTraversalStore
-		}
+		defer badgerStore.Close()
+		baseStore = badgerStore
 	default:
 		return fmt.Errorf("unsupported foundational-store driver: %s", dsn.Driver())
 	}
@@ -218,7 +189,7 @@ func init() {
 	subsink.AddFlagsToSet(ServerCmd.Flags())
 
 	ServerCmd.Flags().String("addr", ":50051", "Address to listen on")
-	ServerCmd.Flags().String("dsn", "", "DSN for the foundational-store (e.g. badger:///path/to/db or postgres://user:pass@host:port/dbname)")
+	ServerCmd.Flags().String("dsn", "", "DSN for the foundational-store (e.g. badger:///path/to/db)")
 	ServerCmd.Flags().String("type-url", "", "any.Any type URL are stripped at storage, this needs to be the domain specific type URL like 'sf.substreams.spl-initialized-account.v2.AccountOwner', used by the server to reconstruct the correct any.Any value at retrieval time")
 	ServerCmd.Flags().Int("workers", 10, "Number of workers for parallel operations")
 	ServerCmd.Flags().String("manifest-path", "", "Path to the manifest file")

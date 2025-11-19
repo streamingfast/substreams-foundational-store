@@ -1,5 +1,6 @@
 version: v2
 deps:
+  - buf.build/streamingfast/substreams
   - buf.build/streamingfast/substreams-sink-sql
 modules:
   - path: proto

@@ -62,14 +62,6 @@ High-performance embedded key-value store, ideal for single-node deployments:
 --dsn "badger:///path/to/database"
 ```
 
-### PostgreSQL
-
-Enterprise-grade relational database for distributed deployments:
-
-```bash
---dsn "postgres://user:password@host:port/database?sslmode=require"
-```
-
 See [Hosting a Foundational Store](doc/hosting-foundational-store.md) for backend-specific configuration and tuning.
 
 ## Configuration

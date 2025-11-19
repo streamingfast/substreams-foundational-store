@@ -22,8 +22,13 @@ type testStore struct {
 	cleanup func()
 }
 
-// setupTestStore creates a new badger foundational-store for testing
+// setupTestStore creates a new badger foundational-store for testing (without time traversal)
 func setupTestStore(t *testing.T) *testStore {
+	return setupTestStoreWithTimeTraversal(t, false)
+}
+
+// setupTestStoreWithTimeTraversal creates a new badger foundational-store for testing with time traversal control
+func setupTestStoreWithTimeTraversal(t *testing.T, enableTimeTraversal bool) *testStore {
 	// Create a temporary directory for the badger DB
 	tempDir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
@@ -34,7 +39,7 @@ func setupTestStore(t *testing.T) *testStore {
 
 	// Create a new badger foundational-store
 	typeURL := "type.googleapis.com/test.TestAccountOwner"
-	badgerStore, err := NewStore(dsn, typeURL, 10, nil)
+	badgerStore, err := NewStore(dsn, typeURL, 10, nil, enableTimeTraversal)
 	require.NoError(t, err)
 
 	cleanup := func() {
@@ -80,7 +85,6 @@ func createEntry(blockNumber uint64, key []byte, accountOwner *pbtest.TestAccoun
 }
 
 func TestStoreAndRetrieveAccountOwner(t *testing.T) {
-	// Define test cases
 	testCases := []struct {
 		name         string
 		blockNumber  uint64
@@ -115,46 +119,58 @@ func TestStoreAndRetrieveAccountOwner(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Setup test foundational-store
-			ts := setupTestStore(t)
-			defer ts.cleanup()
+	storeModes := []struct {
+		name                 string
+		timeTraversalEnabled bool
+	}{
+		{"without_time_traversal", false},
+		{"with_time_traversal", true},
+	}
 
-			// Create an AccountOwner object
-			accountOwner := createAccountOwner(tc.ownerValue)
+	for _, sm := range storeModes {
+		t.Run(sm.name, func(t *testing.T) {
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					// Setup test foundational-store
+					ts := setupTestStoreWithTimeTraversal(t, sm.timeTraversalEnabled)
+					defer ts.cleanup()
 
-			// Create and foundational-store the entry
-			entry, err := createEntry(tc.blockNumber, tc.key, accountOwner, ts.typeURL)
-			require.NoError(t, err)
+					// Create an AccountOwner object
+					accountOwner := createAccountOwner(tc.ownerValue)
 
-			err = ts.store.Set(entry, false, tc.blockNumber)
-			require.NoError(t, err)
+					// Create and foundational-store the entry
+					entry, err := createEntry(tc.blockNumber, tc.key, accountOwner, ts.typeURL)
+					require.NoError(t, err)
 
-			// Create a GetRequest to retrieve the Entry
-			getRequest := &pbservice.GetRequest{
-				BlockNumber: tc.requestBlock,
-				BlockHash:   []byte("test_block_hash"),
-				Keys:        []*pbmodel.Key{{Bytes: tc.key}},
-			}
+					err = ts.store.Set(entry, false, tc.blockNumber)
+					require.NoError(t, err)
 
-			// Retrieve the Entry
-			getResponse, err := ts.store.Get(getRequest)
-			require.NoError(t, err)
+					// Create a GetRequest to retrieve the Entry
+					getRequest := &pbservice.GetRequest{
+						BlockNumber: tc.requestBlock,
+						BlockHash:   []byte("test_block_hash"),
+						Keys:        []*pbmodel.Key{{Bytes: tc.key}},
+					}
 
-			if tc.expectFound {
-				assert.Equal(t, pbmodel.ResponseCode_RESPONSE_CODE_FOUND, getResponse.Entries.Entries[0].Code)
+					// Retrieve the Entry
+					getResponse, err := ts.store.Get(getRequest)
+					require.NoError(t, err)
 
-				// Unmarshal the retrieved value into an AccountOwner
-				retrievedAccountOwner := &pbtest.TestAccountOwner{}
-				err = getResponse.Entries.Entries[0].Entry.Value.UnmarshalTo(retrievedAccountOwner)
-				require.NoError(t, err)
+					if tc.expectFound {
+						assert.Equal(t, pbmodel.ResponseCode_RESPONSE_CODE_FOUND, getResponse.Entries.Entries[0].Code)
 
-				// Verify the retrieved AccountOwner matches the original
-				assert.Equal(t, accountOwner.Mint, retrievedAccountOwner.Mint)
-				assert.Equal(t, accountOwner.Owner, retrievedAccountOwner.Owner)
-			} else {
-				assert.Equal(t, pbmodel.ResponseCode_RESPONSE_CODE_NOT_FOUND, getResponse.Entries.Entries[0].Code)
+						// Unmarshal the retrieved value into an AccountOwner
+						retrievedAccountOwner := &pbtest.TestAccountOwner{}
+						err = getResponse.Entries.Entries[0].Entry.Value.UnmarshalTo(retrievedAccountOwner)
+						require.NoError(t, err)
+
+						// Verify the retrieved AccountOwner matches the original
+						assert.Equal(t, accountOwner.Mint, retrievedAccountOwner.Mint)
+						assert.Equal(t, accountOwner.Owner, retrievedAccountOwner.Owner)
+					} else {
+						assert.Equal(t, pbmodel.ResponseCode_RESPONSE_CODE_NOT_FOUND, getResponse.Entries.Entries[0].Code)
+					}
+				})
 			}
 		})
 	}
