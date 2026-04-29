@@ -25,18 +25,24 @@ message Keys {
 // Entry represents a single key-value pair stored in the foundational store.
 // Used by both consumer and sinker Substreams modules for data exchange.
 // The entry contains a key and an arbitrary value wrapped in Any type.
+// The update_policy specifies how the value should be merged with existing data.
+// The value_type indicates the format of the value for proper deserialization.
 message Entry {
   reserved 1; //backward compatibility
   Key key = 2;
   google.protobuf.Any value = 4;
+  UpdatePolicy update_policy = 5;
+  string value_type = 6;  // "int64", "bigint", "float64", "bigdecimal", "bytes"
 }
 
 // SinkEntries represents a batch of entries to be stored by sinker modules.
 // Contains multiple entries that should be stored atomically, with an option
 // to only store entries if their keys don't already exist.
+// The delete_prefixes field allows for efficient prefix-based deletion.
 message SinkEntries {
   repeated Entry entries = 1;
   bool if_not_exist = 2;
+  repeated string delete_prefixes = 3;
 }
 
 // QueriedEntry represents the result of a get operation for a single key.
@@ -66,4 +72,23 @@ enum ResponseCode {
   RESPONSE_CODE_NOT_FOUND = 2;
   // Key was deleted after finality (LIB) -> historical reference
   RESPONSE_CODE_NOT_FOUND_FINALIZE = 4;
+}
+
+// UpdatePolicy defines how a value should be merged with existing data.
+// Used by Badger-backed stores to perform policy-aware read-modify-write operations.
+enum UpdatePolicy {
+  // Default: replace existing value with new value
+  UPDATE_POLICY_SET = 0;
+  // Only set if key does not exist
+  UPDATE_POLICY_SET_IF_NOT_EXISTS = 1;
+  // Add numeric values (requires value_type to be numeric)
+  UPDATE_POLICY_ADD = 2;
+  // Keep minimum of existing and new value
+  UPDATE_POLICY_MIN = 3;
+  // Keep maximum of existing and new value
+  UPDATE_POLICY_MAX = 4;
+  // Append bytes to existing value
+  UPDATE_POLICY_APPEND = 5;
+  // Sum deltas (special ADD variant)
+  UPDATE_POLICY_SET_SUM = 6;
 }

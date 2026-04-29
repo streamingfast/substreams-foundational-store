@@ -97,6 +97,83 @@ func (s *GrpcServer) GetFirst(ctx context.Context, req *pbservice.GetRequest) (*
 	return r, nil
 }
 
+// SetAll implements the write endpoint for BadgerBackedStore to persist operations
+func (s *GrpcServer) SetAll(ctx context.Context, req *pbservice.SetRequest) (*pbservice.SetResponse, error) {
+	executionStart := time.Now()
+	
+	if req.SinkEntries == nil {
+		return &pbservice.SetResponse{EntriesWritten: 0}, nil
+	}
+	
+	err := s.store.SetAll(req.SinkEntries.Entries, req.SinkEntries.IfNotExist, req.BlockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("setting entries in store: %w", err)
+	}
+	
+	s.logger.Info("setall stats",
+		zap.Uint64("block_number", req.BlockNumber),
+		zap.Int("entries_count", len(req.SinkEntries.Entries)),
+		zap.Int("delete_prefixes_count", len(req.SinkEntries.DeletePrefixes)),
+		zap.Bool("if_not_exist", req.SinkEntries.IfNotExist),
+		zap.Duration("execution_time", time.Since(executionStart)),
+	)
+	
+	return &pbservice.SetResponse{
+		EntriesWritten: uint64(len(req.SinkEntries.Entries)),
+	}, nil
+}
+
+// FlushUpToBlock implements the flush endpoint to persist entries up to LIB
+func (s *GrpcServer) FlushUpToBlock(ctx context.Context, req *pbservice.FlushRequest) (*pbservice.FlushResponse, error) {
+	executionStart := time.Now()
+	
+	// Check if store supports flushing
+	forkAwareStore, ok := s.store.(store.ForkawareStore)
+	if !ok {
+		return nil, fmt.Errorf("store does not support FlushUpToBlock operation")
+	}
+	
+	err := forkAwareStore.FlushUpToBlock(req.BlockNumber, req.IfNotExist)
+	if err != nil {
+		return nil, fmt.Errorf("flushing store up to block %d: %w", req.BlockNumber, err)
+	}
+	
+	s.logger.Info("flush stats",
+		zap.Uint64("block_number", req.BlockNumber),
+		zap.Bool("if_not_exist", req.IfNotExist),
+		zap.Duration("execution_time", time.Since(executionStart)),
+	)
+	
+	return &pbservice.FlushResponse{
+		EntriesFlushed: 0, // TODO: track actual count
+	}, nil
+}
+
+// EvictUpToBlock implements the eviction endpoint for fork handling
+func (s *GrpcServer) EvictUpToBlock(ctx context.Context, req *pbservice.EvictRequest) (*pbservice.EvictResponse, error) {
+	executionStart := time.Now()
+	
+	// Check if store supports eviction
+	forkAwareStore, ok := s.store.(store.ForkawareStore)
+	if !ok {
+		return nil, fmt.Errorf("store does not support EvictUpToBlock operation")
+	}
+	
+	err := forkAwareStore.EvictUpToBlock(req.BlockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("evicting entries from block %d: %w", req.BlockNumber, err)
+	}
+	
+	s.logger.Info("evict stats",
+		zap.Uint64("block_number", req.BlockNumber),
+		zap.Duration("execution_time", time.Since(executionStart)),
+	)
+	
+	return &pbservice.EvictResponse{
+		EntriesEvicted: 0, // TODO: track actual count
+	}, nil
+}
+
 func (s *GrpcServer) Run(addr string, opts ...grpc.ServerOption) {
 	// Create the dgrpc server with reduced per-call logging
 	grpcLogger := s.logger.Named("grpc").WithOptions(zap.IncreaseLevel(zap.WarnLevel))

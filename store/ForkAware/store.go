@@ -7,6 +7,7 @@ import (
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
+	"github.com/streamingfast/substreams-foundational-store/store/arithmetic"
 )
 
 type cachedEntry struct {
@@ -73,9 +74,43 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 		toSet = filtered
 	}
 
-	// Set in cache
+	// Set in cache with policy-aware merging
 	for _, entry := range toSet {
 		key := string(entry.Key.Bytes)
+		
+		// Check if entry already exists in cache at the same block
+		if existing, exists := s.cache[key]; exists && existing.blockNumber == blockNumber {
+			// Need to merge with existing cached entry using update policy
+			policy := entry.UpdatePolicy
+			if policy == 0 {
+				policy = pbmodel.UpdatePolicy_UPDATE_POLICY_SET
+			}
+			
+			valueType := entry.ValueType
+			if valueType == "" {
+				valueType = "bytes"
+			}
+			
+			// Only merge for accumulating policies
+			if policy == pbmodel.UpdatePolicy_UPDATE_POLICY_ADD || 
+			   policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_SUM ||
+			   policy == pbmodel.UpdatePolicy_UPDATE_POLICY_APPEND {
+				// Merge the existing cached value with the new value
+				mergedValue, err := arithmetic.ApplyUpdatePolicy(
+					existing.entry.Value.Value,
+					entry.Value.Value,
+					policy,
+					valueType,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to merge cached entry for key %s: %w", key, err)
+				}
+				
+				// Update the cached entry with merged value
+				entry.Value.Value = mergedValue
+			}
+		}
+		
 		s.cache[key] = cachedEntry{
 			entry:       entry,
 			blockNumber: blockNumber,

@@ -15,9 +15,18 @@ service Store {
   // Get retrieves one or more values from the store at a specific block.
   // Returns entries for all requested keys, with appropriate status codes for missing keys.
   rpc Get(GetRequest) returns (GetResponse);
-  // GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested`  key.
+  // GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested key.
   // Useful for range queries and finding the next key in sorted order.
   rpc GetFirst(GetRequest) returns (GetResponse);
+  // SetAll writes multiple entries to the store at a specific block with policy-aware merging.
+  // Used by BadgerBackedStore to persist operations from substreams tier2.
+  rpc SetAll(SetRequest) returns (SetResponse);
+  // FlushUpToBlock persists all entries up to the specified block number (LIB) to the backing store.
+  // Entries above this block remain in the ForkAware cache.
+  rpc FlushUpToBlock(FlushRequest) returns (FlushResponse);
+  // EvictUpToBlock removes all entries at or above the specified block number (fork rollback).
+  // Used to handle blockchain reorganizations.
+  rpc EvictUpToBlock(EvictRequest) returns (EvictResponse);
 }
 
 // GetRequest specifies the parameters for retrieving values from the store.
@@ -44,4 +53,44 @@ message GetResponse {
   // The query results for each requested key.
   // Each entry corresponds to one of the keys in the request, in the same order.
   model.v2.QueriedEntries entries = 2;
+}
+
+// SetRequest specifies entries to write to the store.
+message SetRequest {
+  // The entries to write to the store.
+  model.v2.SinkEntries sink_entries = 1;
+  // The block number at which these entries are being written.
+  uint64 block_number = 2;
+}
+
+// SetResponse contains the result of a SetAll operation.
+message SetResponse {
+  // Number of entries successfully written.
+  uint64 entries_written = 1;
+}
+
+// FlushRequest specifies the block up to which to persist data.
+message FlushRequest {
+  // The block number up to which to flush (typically LIB).
+  uint64 block_number = 1;
+  // Whether to use if_not_exist semantics when flushing.
+  bool if_not_exist = 2;
+}
+
+// FlushResponse contains the result of a FlushUpToBlock operation.
+message FlushResponse {
+  // Number of entries flushed from cache to backing store.
+  uint64 entries_flushed = 1;
+}
+
+// EvictRequest specifies the block number from which to evict data.
+message EvictRequest {
+  // The block number at or above which to evict entries (reorg point).
+  uint64 block_number = 1;
+}
+
+// EvictResponse contains the result of an EvictUpToBlock operation.
+message EvictResponse {
+  // Number of entries evicted from the cache.
+  uint64 entries_evicted = 1;
 }

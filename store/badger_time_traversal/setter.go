@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/badger/v3"
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
+	"github.com/streamingfast/substreams-foundational-store/store/arithmetic"
 )
 
 // makeTimeTraversalKey creates a composite key by appending the reversed block number to the original key
@@ -77,56 +78,132 @@ func (s *Store) Set(entry *pbmodel.Entry, IfNotExist bool, blockNumber uint64) e
 }
 
 // SetAll stores multiple entries in Badger with time traversal support
+// Now supports policy-aware writes for ADD, MIN, MAX, APPEND, and SET_SUM operations
 func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	// Use a batch writer for better performance with multiple entries
-	wb := s.db.NewWriteBatch()
-	defer wb.Cancel()
+	// Process entries in a transaction for consistency
+	err := s.db.Update(func(txn *badger.Txn) error {
+		for _, entry := range entries {
+			// Determine effective update policy
+			policy := entry.UpdatePolicy
+			if policy == 0 {
+				policy = pbmodel.UpdatePolicy_UPDATE_POLICY_SET
+			}
+			
+			// Override with IfNotExist if specified at batch level
+			if IfNotExist {
+				policy = pbmodel.UpdatePolicy_UPDATE_POLICY_SET_IF_NOT_EXISTS
+			}
 
-	for _, entry := range entries {
-		if IfNotExist {
-			// For time traversal, check if any version of this key exists
-			err := s.db.View(func(txn *badger.Txn) error {
-				opts := badger.DefaultIteratorOptions
-				opts.PrefetchSize = 10
-				it := txn.NewIterator(opts)
-				defer it.Close()
+			valueType := entry.ValueType
+			if valueType == "" {
+				valueType = "bytes" // default
+			}
 
-				prefix := entry.Key.Bytes
-				for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-					// If we find any key with this prefix, it means the key exists
-					return nil
-				}
-				return badger.ErrKeyNotFound
-			})
-			if err == nil {
-				// Key exists, skip this entry
+			// Create composite key with block number
+			compositeKey := makeTimeTraversalKey(entry.Key.Bytes, blockNumber)
+
+			// For policies that need read-modify-write, read existing value first
+			var existingValue []byte
+			needsRead := policy != pbmodel.UpdatePolicy_UPDATE_POLICY_SET
+
+			if needsRead {
+				// Try to get existing value at this block or earlier
+				existingValue, _ = s.getValueAtBlock(txn, entry.Key.Bytes, blockNumber)
+			}
+
+			// Apply update policy to determine final value
+			newValue := entry.Value.Value
+			finalValue, err := arithmetic.ApplyUpdatePolicy(existingValue, newValue, policy, valueType)
+			if err != nil {
+				return fmt.Errorf("failed to apply update policy for key %s: %w", string(entry.Key.Bytes), err)
+			}
+
+			// Only write if the policy allows it
+			if policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_IF_NOT_EXISTS && len(existingValue) > 0 {
+				// Key exists, skip
 				continue
 			}
-			if err != badger.ErrKeyNotFound {
-				return fmt.Errorf("failed to check existence of key: %w", err)
+
+			// Store the final value
+			err = txn.Set(compositeKey, finalValue)
+			if err != nil {
+				return fmt.Errorf("failed to set value in Badger for key %s: %w", string(entry.Key.Bytes), err)
 			}
-			// Key doesn't exist, proceed with insertion
 		}
 
-		// Create composite key with block number
-		compositeKey := makeTimeTraversalKey(entry.Key.Bytes, blockNumber)
+		return nil
+	})
 
-		// Store the actual value (without prepending block info)
-		value := entry.Value.Value
-
-		err := wb.Set(compositeKey, value)
-		if err != nil {
-			return fmt.Errorf("failed to add entry to batch: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("failed to update Badger: %w", err)
 	}
 
-	err := wb.Flush()
+	return nil
+}
+
+// getValueAtBlock retrieves the value for a key at or before the specified block
+// This is used for read-modify-write operations in policy-aware updates
+func (s *Store) getValueAtBlock(txn *badger.Txn, key []byte, blockNumber uint64) ([]byte, error) {
+	// Seek to the key at the requested block
+	seekKey := makeTimeTraversalKey(key, blockNumber)
+
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchSize = 1
+	it := txn.NewIterator(opts)
+	defer it.Close()
+
+	// Seek to the requested block or earlier
+	it.Seek(seekKey)
+
+	// Check if we found a valid entry for this key
+	if !it.ValidForPrefix(key) {
+		return nil, badger.ErrKeyNotFound
+	}
+
+	item := it.Item()
+	value, err := item.ValueCopy(nil)
 	if err != nil {
-		return fmt.Errorf("failed to flush batch to Badger: %w", err)
+		return nil, fmt.Errorf("failed to copy value: %w", err)
+	}
+
+	return value, nil
+}
+
+// DeletePrefix removes all keys with the specified prefix
+// This scans all time-traversal versions of keys matching the prefix and deletes them
+func (s *Store) DeletePrefix(prefix string) error {
+	prefixBytes := []byte(prefix)
+
+	err := s.db.Update(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false // We only need keys, not values
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		// Collect keys to delete
+		var keysToDelete [][]byte
+		for it.Seek(prefixBytes); it.ValidForPrefix(prefixBytes); it.Next() {
+			item := it.Item()
+			key := item.KeyCopy(nil)
+			keysToDelete = append(keysToDelete, key)
+		}
+
+		// Delete all matching keys
+		for _, key := range keysToDelete {
+			if err := txn.Delete(key); err != nil {
+				return fmt.Errorf("failed to delete key %s: %w", string(key), err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to delete prefix %s: %w", prefix, err)
 	}
 
 	return nil
