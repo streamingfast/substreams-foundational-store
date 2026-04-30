@@ -1,6 +1,8 @@
 package ForkAware
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
@@ -280,5 +282,148 @@ func TestForkAwareGetFirst_WrappedNotFound(t *testing.T) {
 	// Current ForkAware implementation delegates to wrapped store, so expect NOT_FOUND when wrapped has no match
 	if resp.Entries.Entries[0].Code != pbmodel.ResponseCode_RESPONSE_CODE_NOT_FOUND {
 		t.Fatalf("expected NOT_FOUND, got %v", resp.Entries.Entries[0].Code)
+	}
+}
+
+// encodeInt64 encodes an int64 as a decimal string (matching arithmetic.go wire format)
+func encodeInt64(v int64) []byte {
+	return []byte(fmt.Sprintf("%d", v))
+}
+
+func decodeInt64(b []byte) int64 {
+	v, _ := strconv.ParseInt(string(b), 10, 64)
+	return v
+}
+
+// TestForkAwareCrossBlockADD verifies that ADD accumulation works across different blocks.
+// Block 2: ADD 5 → cache holds 5
+// Block 3: ADD 10 → cache should hold 15 (not 10)
+func TestForkAwareCrossBlockADD(t *testing.T) {
+	ms := newMockStore()
+	fa := NewStore(ms)
+
+	key := &pbmodel.Key{Bytes: []byte("counter")}
+
+	entry1 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(5)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+	entry2 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(10)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+
+	if err := fa.SetAll([]*pbmodel.Entry{entry1}, false, 2); err != nil {
+		t.Fatalf("block 2 set: %v", err)
+	}
+	if err := fa.SetAll([]*pbmodel.Entry{entry2}, false, 3); err != nil {
+		t.Fatalf("block 3 set: %v", err)
+	}
+
+	resp, err := fa.Get(&pbservice.GetRequest{BlockNumber: 3, Keys: []*pbmodel.Key{key}})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if resp.Entries.Entries[0].Code != pbmodel.ResponseCode_RESPONSE_CODE_FOUND {
+		t.Fatalf("expected FOUND, got %v", resp.Entries.Entries[0].Code)
+	}
+	got := decodeInt64(resp.Entries.Entries[0].Entry.Value.Value)
+	if got != 15 {
+		t.Errorf("expected accumulated value 15, got %d", got)
+	}
+}
+
+// TestForkAwareSameBlockADD verifies same-block ADD accumulation and that the caller's
+// original entry proto is not mutated (BUG-4).
+func TestForkAwareSameBlockADD(t *testing.T) {
+	ms := newMockStore()
+	fa := NewStore(ms)
+
+	key := &pbmodel.Key{Bytes: []byte("counter")}
+
+	entry1 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(3)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+	entry2 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(7)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+
+	// Both at block 5
+	if err := fa.SetAll([]*pbmodel.Entry{entry1}, false, 5); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+	if err := fa.SetAll([]*pbmodel.Entry{entry2}, false, 5); err != nil {
+		t.Fatalf("second set: %v", err)
+	}
+
+	// entry2's original value should NOT be mutated
+	if got := decodeInt64(entry2.Value.Value); got != 7 {
+		t.Errorf("caller entry2 was mutated: expected 7, got %d", got)
+	}
+
+	resp, err := fa.Get(&pbservice.GetRequest{BlockNumber: 5, Keys: []*pbmodel.Key{key}})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	got := decodeInt64(resp.Entries.Entries[0].Entry.Value.Value)
+	if got != 10 {
+		t.Errorf("expected 10, got %d", got)
+	}
+}
+
+// TestForkAwareFlushSendsSetPolicy verifies that after cross-block ADD accumulation,
+// the value flushed to the wrapped store uses UPDATE_POLICY_SET (not ADD),
+// since the ForkAware layer has already resolved the accumulated value.
+func TestForkAwareFlushSendsSetPolicy(t *testing.T) {
+	ms := newMockStore()
+	fa := NewStore(ms)
+
+	key := &pbmodel.Key{Bytes: []byte("counter")}
+
+	entry1 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(5)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+	entry2 := &pbmodel.Entry{
+		Key:          key,
+		Value:        &anypb.Any{Value: encodeInt64(10)},
+		UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_ADD,
+		ValueType:    "int64",
+	}
+
+	if err := fa.SetAll([]*pbmodel.Entry{entry1}, false, 2); err != nil {
+		t.Fatalf("block 2: %v", err)
+	}
+	if err := fa.SetAll([]*pbmodel.Entry{entry2}, false, 3); err != nil {
+		t.Fatalf("block 3: %v", err)
+	}
+
+	if err := fa.FlushUpToBlock(3, false); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	cached, ok := ms.entries["counter"]
+	if !ok {
+		t.Fatal("expected entry in wrapped store after flush")
+	}
+	// Value should be 15 (accumulated)
+	if got := decodeInt64(cached.entry.Value.Value); got != 15 {
+		t.Errorf("expected flushed value 15, got %d", got)
+	}
+	// Policy should be SET (not ADD) so Badger doesn't double-apply
+	if cached.entry.UpdatePolicy != pbmodel.UpdatePolicy_UPDATE_POLICY_SET {
+		t.Errorf("expected UPDATE_POLICY_SET in flushed entry, got %v", cached.entry.UpdatePolicy)
 	}
 }

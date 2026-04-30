@@ -8,6 +8,7 @@ import (
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
 	"github.com/streamingfast/substreams-foundational-store/store/arithmetic"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type cachedEntry struct {
@@ -77,25 +78,26 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 	// Set in cache with policy-aware merging
 	for _, entry := range toSet {
 		key := string(entry.Key.Bytes)
-		
-		// Check if entry already exists in cache at the same block
-		if existing, exists := s.cache[key]; exists && existing.blockNumber == blockNumber {
-			// Need to merge with existing cached entry using update policy
-			policy := entry.UpdatePolicy
-			if policy == 0 {
-				policy = pbmodel.UpdatePolicy_UPDATE_POLICY_SET
-			}
-			
-			valueType := entry.ValueType
-			if valueType == "" {
-				valueType = "bytes"
-			}
-			
-			// Only merge for accumulating policies
-			if policy == pbmodel.UpdatePolicy_UPDATE_POLICY_ADD || 
-			   policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_SUM ||
-			   policy == pbmodel.UpdatePolicy_UPDATE_POLICY_APPEND {
-				// Merge the existing cached value with the new value
+
+		policy := entry.UpdatePolicy
+		if policy == 0 {
+			policy = pbmodel.UpdatePolicy_UPDATE_POLICY_SET
+		}
+
+		valueType := entry.ValueType
+		if valueType == "" {
+			valueType = "bytes"
+		}
+
+		// For accumulating policies, merge with the existing cached value regardless of block number.
+		// This ensures cross-block accumulation is handled entirely in the ForkAware layer;
+		// when we eventually flush to Badger we send a SET with the fully-resolved value.
+		if existing, exists := s.cache[key]; exists {
+			shouldAccumulate := policy == pbmodel.UpdatePolicy_UPDATE_POLICY_ADD ||
+				policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_SUM ||
+				policy == pbmodel.UpdatePolicy_UPDATE_POLICY_APPEND
+
+			if shouldAccumulate {
 				mergedValue, err := arithmetic.ApplyUpdatePolicy(
 					existing.entry.Value.Value,
 					entry.Value.Value,
@@ -105,12 +107,19 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 				if err != nil {
 					return fmt.Errorf("failed to merge cached entry for key %s: %w", key, err)
 				}
-				
-				// Update the cached entry with merged value
-				entry.Value.Value = mergedValue
+
+				// Clone the entry before storing to avoid mutating the caller's proto.
+				// The flushed-to-Badger value will be the fully-accumulated result,
+				// sent as UPDATE_POLICY_SET so Badger does not re-apply the policy.
+				entry = &pbmodel.Entry{
+					Key:          entry.Key,
+					Value:        &anypb.Any{TypeUrl: entry.Value.TypeUrl, Value: mergedValue},
+					UpdatePolicy: pbmodel.UpdatePolicy_UPDATE_POLICY_SET,
+					ValueType:    entry.ValueType,
+				}
 			}
 		}
-		
+
 		s.cache[key] = cachedEntry{
 			entry:       entry,
 			blockNumber: blockNumber,
