@@ -28,6 +28,9 @@ func init() {
 
 	// Add commands
 	rootCmd.AddCommand(GetCmd)
+	rootCmd.AddCommand(SetCmd)
+	rootCmd.AddCommand(FlushCmd)
+	rootCmd.AddCommand(EvictCmd)
 	rootCmd.AddCommand(ServerCmd)
 }
 
