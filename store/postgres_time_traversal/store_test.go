@@ -250,7 +250,7 @@ func TestSetAllAndGetAll(t *testing.T) {
 	}
 
 	// Store all entries
-	err := ts.store.SetAll(entries, false, blockNumber)
+	err := ts.store.SetAll(entries, nil, false, blockNumber)
 	require.NoError(t, err)
 
 	// Prepare keys for GetAll
@@ -305,7 +305,7 @@ func TestSetAllAndGetAllWithDifferentBlocks(t *testing.T) {
 		entries100 = append(entries100, entry)
 	}
 
-	err := ts.store.SetAll(entries100, false, 100)
+	err := ts.store.SetAll(entries100, nil, false, 100)
 	require.NoError(t, err)
 
 	// Block 200: Updated values
@@ -319,7 +319,7 @@ func TestSetAllAndGetAllWithDifferentBlocks(t *testing.T) {
 		entries200 = append(entries200, entry)
 	}
 
-	err = ts.store.SetAll(entries200, false, 200)
+	err = ts.store.SetAll(entries200, nil, false, 200)
 	require.NoError(t, err)
 
 	// Test retrieving at different block numbers
@@ -381,7 +381,7 @@ func TestGetAllKeysOnly(t *testing.T) {
 		entries = append(entries, entry)
 	}
 
-	err := ts.store.SetAll(entries, false, blockNumber)
+	err := ts.store.SetAll(entries, nil, false, blockNumber)
 	require.NoError(t, err)
 
 	// Test GetAllKeysOnly (service method)
@@ -429,7 +429,7 @@ func TestEmptySetAll(t *testing.T) {
 	defer ts.cleanup()
 
 	// Test SetAll with empty entries
-	err := ts.store.SetAll([]*pbmodel.Entry{}, false, 100)
+	err := ts.store.SetAll([]*pbmodel.Entry{}, nil, false, 100)
 	require.NoError(t, err)
 }
 
@@ -611,11 +611,11 @@ func TestIfNotExist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set entry3 normally
-	err = ts.store.SetAll([]*pbmodel.Entry{entry3}, false, 100)
+	err = ts.store.SetAll([]*pbmodel.Entry{entry3}, nil, false, 100)
 	require.NoError(t, err)
 
 	// Try to set entry4 with IfNotExist=true, should skip
-	err = ts.store.SetAll([]*pbmodel.Entry{entry4}, true, 200)
+	err = ts.store.SetAll([]*pbmodel.Entry{entry4}, nil, true, 200)
 	require.NoError(t, err)
 
 	// Check value is still value3

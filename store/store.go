@@ -6,13 +6,13 @@ import (
 )
 
 type Store interface {
-	SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error
+	SetAll(entries []*pbmodel.Entry, deletePrefixes []string, IfNotExist bool, blockNumber uint64) error
 	Get(request *pbservice.GetRequest) (*pbservice.GetResponse, error)
 	GetFirst(request *pbservice.GetRequest) (*pbservice.GetResponse, error)
 }
 
 type ForkawareStore interface {
 	Store
-	FlushUpToBlock(blockNum uint64, IfNotExist bool) error
-	EvictUpToBlock(upToBlockNumber uint64) error
+	FlushUpToBlock(blockNum uint64, IfNotExist bool) (uint64, error)
+	EvictUpToBlock(upToBlockNumber uint64) (uint64, error)
 }

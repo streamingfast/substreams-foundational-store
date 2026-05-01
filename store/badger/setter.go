@@ -52,7 +52,14 @@ func (s *Store) Set(entry *pbmodel.Entry, IfNotExist bool, blockNumber uint64) e
 }
 
 // SetAll stores multiple entries in Badger
-func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
+func (s *Store) SetAll(entries []*pbmodel.Entry, deletePrefixes []string, IfNotExist bool, blockNumber uint64) error {
+	// Handle delete-prefix operations first, before writing new entries.
+	if len(deletePrefixes) > 0 {
+		if err := s.applyDeletePrefixes(deletePrefixes); err != nil {
+			return fmt.Errorf("failed to apply delete prefixes: %w", err)
+		}
+	}
+
 	if len(entries) == 0 {
 		return nil
 	}
@@ -97,5 +104,35 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 		return fmt.Errorf("failed to flush batch to Badger: %w", err)
 	}
 
+	return nil
+}
+
+// applyDeletePrefixes removes all keys from Badger that start with any of the given prefixes.
+func (s *Store) applyDeletePrefixes(prefixes []string) error {
+	for _, prefix := range prefixes {
+		prefixBytes := []byte(prefix)
+		err := s.db.Update(func(txn *badger.Txn) error {
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+			it := txn.NewIterator(opts)
+			defer it.Close()
+
+			var keysToDelete [][]byte
+			for it.Seek(prefixBytes); it.ValidForPrefix(prefixBytes); it.Next() {
+				keysToDelete = append(keysToDelete, it.Item().KeyCopy(nil))
+			}
+			it.Close()
+
+			for _, key := range keysToDelete {
+				if err := txn.Delete(key); err != nil {
+					return fmt.Errorf("failed to delete key %q: %w", key, err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete prefix %q: %w", prefix, err)
+		}
+	}
 	return nil
 }

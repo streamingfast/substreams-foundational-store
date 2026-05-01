@@ -79,7 +79,16 @@ func (s *Store) Set(entry *pbmodel.Entry, IfNotExist bool, blockNumber uint64) e
 
 // SetAll stores multiple entries in Badger with time traversal support
 // Now supports policy-aware writes for ADD, MIN, MAX, APPEND, and SET_SUM operations
-func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
+func (s *Store) SetAll(entries []*pbmodel.Entry, deletePrefixes []string, IfNotExist bool, blockNumber uint64) error {
+	// Handle delete-prefix operations first, before writing new entries.
+	if len(deletePrefixes) > 0 {
+		for _, prefix := range deletePrefixes {
+			if err := s.DeletePrefix(prefix); err != nil {
+				return fmt.Errorf("failed to delete prefix %q: %w", prefix, err)
+			}
+		}
+	}
+
 	if len(entries) == 0 {
 		return nil
 	}

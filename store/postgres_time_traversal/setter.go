@@ -35,7 +35,7 @@ func (s *Store) Set(entry *pbmodel.Entry, IfNotExist bool, blockNumber uint64) e
 	return nil
 }
 
-func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
+func (s *Store) SetAll(entries []*pbmodel.Entry, deletePrefixes []string, IfNotExist bool, blockNumber uint64) error {
 	if len(entries) == 0 {
 		return nil
 	}

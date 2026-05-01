@@ -34,10 +34,23 @@ func NewStore(wrapped store.Store) *Store {
 	}
 }
 
-// SetAll stores multiple entries in the ForkAware.
-func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
+// SetAll stores multiple entries in the ForkAware. deletePrefixes are applied to the cache
+// (removing any cached key that starts with a given prefix) and forwarded to the wrapped store.
+func (s *Store) SetAll(entries []*pbmodel.Entry, deletePrefixes []string, IfNotExist bool, blockNumber uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Apply delete-prefix operations to the cache before inserting new entries.
+	if len(deletePrefixes) > 0 {
+		for key := range s.cache {
+			for _, prefix := range deletePrefixes {
+				if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+					delete(s.cache, key)
+					break
+				}
+			}
+		}
+	}
 
 	var toSet []*pbmodel.Entry
 	for _, entry := range entries {
@@ -89,28 +102,41 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 			valueType = "bytes"
 		}
 
-		// For accumulating policies, merge with the existing cached value regardless of block number.
-		// This ensures cross-block accumulation is handled entirely in the ForkAware layer;
-		// when we eventually flush to Badger we send a SET with the fully-resolved value.
-		if existing, exists := s.cache[key]; exists {
-			shouldAccumulate := policy == pbmodel.UpdatePolicy_UPDATE_POLICY_ADD ||
-				policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_SUM ||
-				policy == pbmodel.UpdatePolicy_UPDATE_POLICY_APPEND
+		// For accumulating policies, merge with the existing value (cache first, then wrapped store).
+		// This ensures cross-block accumulation survives FlushUpToBlock, which evicts the cache entry
+		// after persisting it to the wrapped store. Without this, each flush resets accumulation.
+		shouldAccumulate := policy == pbmodel.UpdatePolicy_UPDATE_POLICY_ADD ||
+			policy == pbmodel.UpdatePolicy_UPDATE_POLICY_SET_SUM ||
+			policy == pbmodel.UpdatePolicy_UPDATE_POLICY_APPEND ||
+			policy == pbmodel.UpdatePolicy_UPDATE_POLICY_MIN ||
+			policy == pbmodel.UpdatePolicy_UPDATE_POLICY_MAX
 
-			if shouldAccumulate {
+		if shouldAccumulate {
+			var existingValue []byte
+			if existing, exists := s.cache[key]; exists {
+				existingValue = existing.entry.Value.Value
+			} else {
+				// Cache miss — check the wrapped store (e.g. after a flush evicted this key).
+				resp, err := s.wrapped.Get(&pbservice.GetRequest{
+					Keys:        []*pbmodel.Key{entry.Key},
+					BlockNumber: blockNumber,
+				})
+				if err == nil && len(resp.Entries.Entries) > 0 &&
+					resp.Entries.Entries[0].Code == pbmodel.ResponseCode_RESPONSE_CODE_FOUND {
+					existingValue = resp.Entries.Entries[0].Entry.Value.Value
+				}
+			}
+
+			if len(existingValue) > 0 {
 				mergedValue, err := arithmetic.ApplyUpdatePolicy(
-					existing.entry.Value.Value,
+					existingValue,
 					entry.Value.Value,
 					policy,
 					valueType,
 				)
 				if err != nil {
-					return fmt.Errorf("failed to merge cached entry for key %s: %w", key, err)
+					return fmt.Errorf("failed to merge entry for key %s: %w", key, err)
 				}
-
-				// Clone the entry before storing to avoid mutating the caller's proto.
-				// The flushed-to-Badger value will be the fully-accumulated result,
-				// sent as UPDATE_POLICY_SET so Badger does not re-apply the policy.
 				entry = &pbmodel.Entry{
 					Key:          entry.Key,
 					Value:        &anypb.Any{TypeUrl: entry.Value.TypeUrl, Value: mergedValue},
@@ -136,9 +162,9 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 		}
 	}
 
-	// Flush collected entries to the wrapped foundational-store
-	if len(toFlush) > 0 {
-		if err := s.wrapped.SetAll(toFlush, IfNotExist, blockNumber); err != nil {
+	// Flush collected entries to the wrapped foundational-store (deletePrefixes already applied to cache above)
+	if len(toFlush) > 0 || len(deletePrefixes) > 0 {
+		if err := s.wrapped.SetAll(toFlush, deletePrefixes, IfNotExist, blockNumber); err != nil {
 			return fmt.Errorf("failed to set entries in wrapped foundational-store: %w", err)
 		}
 	}
@@ -185,7 +211,8 @@ func (s *Store) GetFirst(request *pbservice.GetRequest) (*pbservice.GetResponse,
 }
 
 // FlushUpToBlock flushes all entries with block numbers <= blockNum to the wrapped foundational-store.
-func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
+// Returns the number of entries flushed.
+func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) (uint64, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -203,8 +230,8 @@ func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
 
 	// Flush collected entries to the wrapped foundational-store
 	if len(toFlush) > 0 {
-		if err := s.wrapped.SetAll(toFlush, IfNotExist, blockNum); err != nil {
-			return fmt.Errorf("failed to flush entries to wrapped foundational-store: %w", err)
+		if err := s.wrapped.SetAll(toFlush, nil, IfNotExist, blockNum); err != nil {
+			return 0, fmt.Errorf("failed to flush entries to wrapped foundational-store: %w", err)
 		}
 
 		// Remove flushed entries from ForkAware
@@ -213,11 +240,12 @@ func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
 		}
 	}
 
-	return nil
+	return uint64(len(toFlush)), nil
 }
 
 // EvictUpToBlock removes all keys from the ForkAware where the block number is >= to upToBlockNumber.
-func (s *Store) EvictUpToBlock(upToBlockNumber uint64) error {
+// Returns the number of entries evicted.
+func (s *Store) EvictUpToBlock(upToBlockNumber uint64) (uint64, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,5 +263,5 @@ func (s *Store) EvictUpToBlock(upToBlockNumber uint64) error {
 		delete(s.cache, key)
 	}
 
-	return nil
+	return uint64(len(keysToEvict)), nil
 }

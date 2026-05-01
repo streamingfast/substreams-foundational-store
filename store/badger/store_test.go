@@ -385,7 +385,7 @@ func TestSetAllAndGetAll(t *testing.T) {
 			}
 
 			// Store all entries using SetAll
-			err := ts.store.SetAll(entries, false, tc.blockNumber)
+			err := ts.store.SetAll(entries, nil, false, tc.blockNumber)
 			require.NoError(t, err)
 
 			// Create a GetRequest to retrieve all entries
@@ -651,7 +651,7 @@ func TestGetAllWithBlockNumber(t *testing.T) {
 
 			// Store entries for each block
 			for blockNumber, entries := range entriesByBlock {
-				err := ts.store.SetAll(entries, false, blockNumber)
+				err := ts.store.SetAll(entries, nil, false, blockNumber)
 				require.NoError(t, err)
 			}
 
@@ -775,7 +775,7 @@ func TestSetAllAndGetAllWithNonExistentKey(t *testing.T) {
 			}
 
 			// Store all entries using SetAll
-			err := ts.store.SetAll(entries, false, tc.blockNumber)
+			err := ts.store.SetAll(entries, nil, false, tc.blockNumber)
 			require.NoError(t, err)
 
 			// Create non-existent keys
@@ -924,11 +924,11 @@ func TestIfNotExist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set entry3 normally
-	err = ts.store.SetAll([]*pbmodel.Entry{entry3}, false, 100)
+	err = ts.store.SetAll([]*pbmodel.Entry{entry3}, nil, false, 100)
 	require.NoError(t, err)
 
 	// Try to set entry4 with IfNotExist=true, should skip
-	err = ts.store.SetAll([]*pbmodel.Entry{entry4}, true, 200)
+	err = ts.store.SetAll([]*pbmodel.Entry{entry4}, nil, true, 200)
 	require.NoError(t, err)
 
 	// Check value is still value3

@@ -76,12 +76,11 @@ func (s *Sinker) HandleBlockScopedData(ctx context.Context, data *pbsubstreamsrp
 
 		}
 
-		if err := s.store.SetAll(entries.Entries, entries.IfNotExist, data.GetClock().Number); err != nil {
+		if err := s.store.SetAll(entries.Entries, entries.DeletePrefixes, entries.IfNotExist, data.GetClock().Number); err != nil {
 			return fmt.Errorf("setting foundational-store entry: %w", err)
 		}
 
-		err := s.store.FlushUpToBlock(lib, entries.IfNotExist)
-		if err != nil {
+		if _, err := s.store.FlushUpToBlock(lib, entries.IfNotExist); err != nil {
 			return fmt.Errorf("flushing up to block up to lib %d: %w", lib, err)
 		}
 	}
@@ -112,7 +111,7 @@ func (s *Sinker) HandleBlockUndoSignal(ctx context.Context, undoSignal *pbsubstr
 	blockNum := undoSignal.LastValidBlock.Number
 	s.headBlock = blockNum
 
-	if err := s.store.EvictUpToBlock(blockNum); err != nil {
+	if _, err := s.store.EvictUpToBlock(blockNum); err != nil {
 		return fmt.Errorf("failed to evict data up to block %d: %w", blockNum, err)
 	}
 
