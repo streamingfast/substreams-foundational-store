@@ -52,6 +52,12 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 	cursorFilePath, _ := cmd.Flags().GetString("cursor-file-path")
 	noTimeTraversal, _ := cmd.Flags().GetBool("no-time-traversal")
 	storeManagerAddr, _ := cmd.Flags().GetString("store-manager-address")
+	startupDelay, _ := cmd.Flags().GetDuration("startup-delay")
+
+	if startupDelay > 0 {
+		zlog.Info("waiting before starting server", zap.Duration("startup_delay", startupDelay))
+		time.Sleep(startupDelay)
+	}
 
 	if serverDSN == "" {
 		return fmt.Errorf("dsn is required")
@@ -229,6 +235,7 @@ func init() {
 	ServerCmd.Flags().Int("flush-queue-size", 3, "Size of the async flush queue buffer")
 	ServerCmd.Flags().Bool("no-time-traversal", false, "Disable time traversal mode and use original badger store implementation")
 	ServerCmd.Flags().String("store-manager-address", "", "Address of the store manager to ping every 30 seconds")
+	ServerCmd.Flags().Duration("startup-delay", 0, "Delay before starting the server (e.g. 5s, 1m)")
 
 	ServerCmd.MarkFlagRequired("dsn")
 	ServerCmd.MarkFlagRequired("type-url")
