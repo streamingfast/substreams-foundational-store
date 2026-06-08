@@ -112,18 +112,10 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 	// Wrap the foundational-store with a ForkAware foundational-store
 	storeImpl := ForkAware.NewStore(baseStore)
 
-	// Load cursor from file if it exists and set it in the command flags so subsink.NewFromViper can use it
-	cursor := sink.LoadCursorFromFile(zlog, cursorFilePath)
-	if cursor != nil {
-		zlog.Info("loaded cursor from file, will resume from saved position")
-	} else {
-		zlog.Info("no cursor file found, will start from the beginning")
-	}
-
 	app := cli.NewApplication(cmd.Context())
 
 	// Create a substreams sink using Viper configuration
-	substreamsClient, err := subsink.NewFromViper(
+	substreamsConfig, err := subsink.ConfigFromViper(
 		cmd,
 		"",
 		manifestPath,
@@ -133,6 +125,25 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 		tracer, // tracer is nil
 	)
 	if err != nil {
+		return fmt.Errorf("failed to create substreams sink config: %w", err)
+	}
+
+	// Resume from the last saved (irreversible) block: everything up to it is durable, so we
+	// restart the stream from lastSavedBlock+1. Hot reconnection is handled internally by the
+	// substreams sink library, so we do not persist or pass a cursor.
+	lastSavedBlock, ok := sink.LoadLastBlockFromFile(zlog, cursorFilePath)
+	if ok {
+		resumeBlock := lastSavedBlock + 1
+		substreamsConfig.StartBlock = int64(resumeBlock)
+		zlog.Info("resuming from last saved block",
+			zap.Uint64("last_saved_block", lastSavedBlock),
+			zap.Uint64("start_block", resumeBlock))
+	} else {
+		zlog.Info("no saved block found, will start from the configured start block")
+	}
+
+	substreamsClient, err := subsink.NewFromConfig(substreamsConfig)
+	if err != nil {
 		return fmt.Errorf("failed to create substreams sink: %w", err)
 	}
 
@@ -140,11 +151,11 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 	dbStatsTicker := time.NewTicker(15 * time.Second)
 	defer dbStatsTicker.Stop()
 
-	sinker := sink.NewSinker(storeImpl, zlog, cursorFilePath, cursor)
+	sinker := sink.NewSinker(storeImpl, zlog, cursorFilePath, lastSavedBlock)
 	server := grpc.NewStoreServer(storeImpl, sinker.HeadBlock, zlog)
 
 	app.SuperviseAndStartUsing(sinker.Shutter, func() {
-		substreamsClient.Run(cmd.Context(), cursor, sinker)
+		substreamsClient.Run(cmd.Context(), nil, sinker)
 		sinker.Shutdown(substreamsClient.Err())
 	})
 

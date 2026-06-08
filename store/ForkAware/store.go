@@ -12,6 +12,10 @@ import (
 type cachedEntry struct {
 	entry       *pbmodel.Entry
 	blockNumber uint64
+	// insertOnly records the write mode this entry must be flushed with: when true the
+	// wrapped store skips the key if it already exists (first-write-wins) instead of
+	// overwriting it. Mirrors the IfNotExist flag from the entry's originating output.
+	insertOnly bool
 }
 
 // Store implements the foundational-store.Store interface by wrapping another foundational-store
@@ -79,6 +83,7 @@ func (s *Store) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber ui
 		s.cache[key] = cachedEntry{
 			entry:       entry,
 			blockNumber: blockNumber,
+			insertOnly:  IfNotExist,
 		}
 	}
 
@@ -141,7 +146,9 @@ func (s *Store) GetFirst(request *pbservice.GetRequest) (*pbservice.GetResponse,
 }
 
 // FlushUpToBlock flushes all entries with block numbers <= blockNum to the wrapped foundational-store.
-func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
+// Each entry is flushed with the IfNotExist flag it was set with, so the flush stays consistent
+// even when it runs on a block that produced no output of its own.
+func (s *Store) FlushUpToBlock(blockNum uint64) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,22 +156,34 @@ func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
 	// Update flushUpToBlock
 	s.flushUpToBlock = blockNum
 
-	// Collect entries to flush
-	var toFlush []*pbmodel.Entry
+	// Collect entries to flush, grouped by their write mode.
+	var toFlush, toFlushInsertOnly []*pbmodel.Entry
 	for _, cached := range s.cache {
 		if cached.blockNumber <= blockNum {
-			toFlush = append(toFlush, cached.entry)
+			if cached.insertOnly {
+				toFlushInsertOnly = append(toFlushInsertOnly, cached.entry)
+			} else {
+				toFlush = append(toFlush, cached.entry)
+			}
 		}
 	}
 
 	// Flush collected entries to the wrapped foundational-store
-	if len(toFlush) > 0 {
-		if err := s.wrapped.SetAll(toFlush, IfNotExist, blockNum); err != nil {
+	for _, group := range []struct {
+		entries    []*pbmodel.Entry
+		ifNotExist bool
+	}{
+		{toFlush, false},
+		{toFlushInsertOnly, true},
+	} {
+		if len(group.entries) == 0 {
+			continue
+		}
+		if err := s.wrapped.SetAll(group.entries, group.ifNotExist, blockNum); err != nil {
 			return fmt.Errorf("failed to flush entries to wrapped foundational-store: %w", err)
 		}
-
 		// Remove flushed entries from ForkAware
-		for _, entry := range toFlush {
+		for _, entry := range group.entries {
 			delete(s.cache, string(entry.Key.Bytes))
 		}
 	}
@@ -172,8 +191,9 @@ func (s *Store) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
 	return nil
 }
 
-// EvictUpToBlock removes all keys from the ForkAware where the block number is >= to upToBlockNumber.
-func (s *Store) EvictUpToBlock(upToBlockNumber uint64) error {
+// EvictAfterBlock removes all keys from the ForkAware whose block number is strictly greater
+// than blockNumber, i.e. everything written after the last valid block of an undo signal.
+func (s *Store) EvictAfterBlock(blockNumber uint64) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,7 +201,7 @@ func (s *Store) EvictUpToBlock(upToBlockNumber uint64) error {
 	// Collect keys to evict
 	var keysToEvict []string
 	for key, cached := range s.cache {
-		if cached.blockNumber >= upToBlockNumber {
+		if cached.blockNumber > blockNumber {
 			keysToEvict = append(keysToEvict, key)
 		}
 	}

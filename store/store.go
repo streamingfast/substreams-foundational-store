@@ -13,6 +13,6 @@ type Store interface {
 
 type ForkawareStore interface {
 	Store
-	FlushUpToBlock(blockNum uint64, IfNotExist bool) error
-	EvictUpToBlock(upToBlockNumber uint64) error
+	FlushUpToBlock(blockNum uint64) error
+	EvictAfterBlock(blockNumber uint64) error
 }

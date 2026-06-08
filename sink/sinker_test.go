@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/streamingfast/bstream"
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"github.com/streamingfast/substreams-foundational-store/store"
@@ -79,17 +80,17 @@ func (m *SimpleMockStore) GetFirst(request *pbservice.GetRequest) (*pbservice.Ge
 	return &pbservice.GetResponse{BlockReached: true, Entries: &pbmodel.QueriedEntries{Entries: entries}}, nil
 }
 
-func (m *SimpleMockStore) FlushUpToBlock(blockNum uint64, IfNotExist bool) error {
+func (m *SimpleMockStore) FlushUpToBlock(blockNum uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.flushCalls = append(m.flushCalls, blockNum)
 	return nil
 }
 
-func (m *SimpleMockStore) EvictUpToBlock(upToBlockNumber uint64) error {
+func (m *SimpleMockStore) EvictAfterBlock(blockNumber uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.evictCalls = append(m.evictCalls, upToBlockNumber)
+	m.evictCalls = append(m.evictCalls, blockNumber)
 	return nil
 }
 
@@ -109,44 +110,57 @@ func (m *SimpleMockStore) GetFlushCalls() []uint64 {
 	return calls
 }
 
-func TestCursorSaveAndLoad(t *testing.T) {
+func TestLastBlockSaveAndLoad(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	tempDir := t.TempDir()
-	cursorFilePath := filepath.Join(tempDir, "test.cursor")
+	blockFilePath := filepath.Join(tempDir, "state.block")
 
-	testCursorStr := "XWQh1iJoYAKTDtvllL7yraWwLpc_DFhvVQvlKhhCjYGDiHqspvzCXTgfFUum8f32iBSqMQXahNirXjQmq6AKuJSypu8Sm3NpAXkk8YPs-7TvePP7OgIRBMNqNpHvBoWCMUGBFGuvfOQBoa-4TKneAQh4P55GdmL211oH1PMGIeQTsRE="
-	originalCursor, err := sink.NewCursor(testCursorStr)
+	if err := SaveLastBlockToFile(25088807, blockFilePath, logger); err != nil {
+		t.Fatalf("Failed to save last block: %v", err)
+	}
+
+	if _, err := os.Stat(blockFilePath); os.IsNotExist(err) {
+		t.Fatalf("Block file was not created")
+	}
+
+	loaded, ok := LoadLastBlockFromFile(logger, blockFilePath)
+	if !ok {
+		t.Fatalf("Failed to load last block from file")
+	}
+	if loaded != 25088807 {
+		t.Errorf("Block mismatch: expected 25088807, got %d", loaded)
+	}
+}
+
+func TestLoadLastBlockMissingFile(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	blockFilePath := filepath.Join(t.TempDir(), "does-not-exist.block")
+
+	if _, ok := LoadLastBlockFromFile(logger, blockFilePath); ok {
+		t.Errorf("Expected missing file to report not-found")
+	}
+}
+
+func TestLoadLastBlockMigratesLegacyCursor(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	blockFilePath := filepath.Join(t.TempDir(), "state.cursor")
+
+	legacyCursorStr := "XWQh1iJoYAKTDtvllL7yraWwLpc_DFhvVQvlKhhCjYGDiHqspvzCXTgfFUum8f32iBSqMQXahNirXjQmq6AKuJSypu8Sm3NpAXkk8YPs-7TvePP7OgIRBMNqNpHvBoWCMUGBFGuvfOQBoa-4TKneAQh4P55GdmL211oH1PMGIeQTsRE="
+	legacyCursor, err := sink.NewCursor(legacyCursorStr)
 	if err != nil {
-		t.Fatalf("Failed to create cursor from test string: %v", err)
+		t.Fatalf("Failed to create legacy cursor: %v", err)
+	}
+	if err := os.WriteFile(blockFilePath, []byte(legacyCursorStr), 0644); err != nil {
+		t.Fatalf("Failed to write legacy cursor file: %v", err)
 	}
 
-	mockStore := NewSimpleMockStore()
-	handler := NewSinker(mockStore, logger, cursorFilePath, originalCursor)
-	defer func() {
-		handler.Shutdown(nil)
-		<-handler.Terminated()
-	}()
-
-	err = SaveCursorToFile(originalCursor, cursorFilePath, logger)
-	if err != nil {
-		t.Fatalf("Failed to save cursor: %v", err)
+	loaded, ok := LoadLastBlockFromFile(logger, blockFilePath)
+	if !ok {
+		t.Fatalf("Failed to migrate legacy cursor file")
 	}
-
-	if _, err := os.Stat(cursorFilePath); os.IsNotExist(err) {
-		t.Fatalf("Cursor file was not created")
-	}
-
-	loadedCursor := LoadCursorFromFile(logger, cursorFilePath)
-	if loadedCursor == nil {
-		t.Fatalf("Failed to load cursor from file")
-	}
-
-	originalStr := originalCursor.String()
-	loadedStr := loadedCursor.String()
-
-	if originalStr != loadedStr {
-		t.Errorf("Cursor mismatch:\nOriginal: %s\nLoaded:   %s", originalStr, loadedStr)
+	if loaded != legacyCursor.LIB.Num() {
+		t.Errorf("Migrated block mismatch: expected %d, got %d", legacyCursor.LIB.Num(), loaded)
 	}
 }
 
@@ -155,7 +169,7 @@ func TestHandleBlockScopedData(t *testing.T) {
 	mockStore := NewSimpleMockStore()
 
 	tempDir := t.TempDir()
-	cursorFilePath := filepath.Join(tempDir, "test.cursor")
+	blockFilePath := filepath.Join(tempDir, "state.block")
 
 	// Create test cursor
 	testCursorStr := "XWQh1iJoYAKTDtvllL7yraWwLpc_DFhvVQvlKhhCjYGDiHqspvzCXTgfFUum8f32iBSqMQXahNirXjQmq6AKuJSypu8Sm3NpAXkk8YPs-7TvePP7OgIRBMNqNpHvBoWCMUGBFGuvfOQBoa-4TKneAQh4P55GdmL211oH1PMGIeQTsRE="
@@ -164,7 +178,7 @@ func TestHandleBlockScopedData(t *testing.T) {
 		t.Fatalf("Failed to create cursor: %v", err)
 	}
 
-	handler := NewSinker(mockStore, logger, cursorFilePath, testCursor)
+	handler := NewSinker(mockStore, logger, blockFilePath, 0)
 	defer func() {
 		handler.Shutdown(nil)
 		<-handler.Terminated()
@@ -231,9 +245,13 @@ func TestHandleBlockScopedData(t *testing.T) {
 		t.Errorf("Expected 1 FlushUpToBlock call, got %d", len(flushCalls))
 	}
 
-	// Verify cursor was saved
-	if _, err := os.Stat(cursorFilePath); os.IsNotExist(err) {
-		t.Error("Cursor file should have been saved")
+	// Verify the last (irreversible) block was persisted at the LIB
+	savedBlock, ok := LoadLastBlockFromFile(logger, blockFilePath)
+	if !ok {
+		t.Fatal("Block file should have been saved")
+	}
+	if savedBlock != testCursor.LIB.Num() {
+		t.Errorf("Expected saved block %d, got %d", testCursor.LIB.Num(), savedBlock)
 	}
 }
 
@@ -242,7 +260,7 @@ func TestHandleBlockUndoSignal(t *testing.T) {
 	mockStore := NewSimpleMockStore()
 
 	tempDir := t.TempDir()
-	cursorFilePath := filepath.Join(tempDir, "undo_test.cursor")
+	blockFilePath := filepath.Join(tempDir, "undo_test.block")
 
 	// Create test cursor
 	testCursorStr := "XWQh1iJoYAKTDtvllL7yraWwLpc_DFhvVQvlKhhCjYGDiHqspvzCXTgfFUum8f32iBSqMQXahNirXjQmq6AKuJSypu8Sm3NpAXkk8YPs-7TvePP7OgIRBMNqNpHvBoWCMUGBFGuvfOQBoa-4TKneAQh4P55GdmL211oH1PMGIeQTsRE="
@@ -251,7 +269,7 @@ func TestHandleBlockUndoSignal(t *testing.T) {
 		t.Fatalf("Failed to create cursor: %v", err)
 	}
 
-	handler := NewSinker(mockStore, logger, cursorFilePath, testCursor)
+	handler := NewSinker(mockStore, logger, blockFilePath, 0)
 	defer func() {
 		handler.Shutdown(nil)
 		<-handler.Terminated()
@@ -278,8 +296,72 @@ func TestHandleBlockUndoSignal(t *testing.T) {
 		t.Errorf("Expected evict call with block 999, got %d", mockStore.evictCalls[0])
 	}
 
-	// Verify cursor was saved
-	if _, err := os.Stat(cursorFilePath); os.IsNotExist(err) {
-		t.Error("Cursor file should have been saved after undo signal")
+	// An undo only affects the reversible segment, so no resume point should be written.
+	if _, err := os.Stat(blockFilePath); !os.IsNotExist(err) {
+		t.Error("Block file should not be written on undo signal")
+	}
+}
+
+// TestHandleBlockScopedData_NoOutput verifies that a block carrying no module output still
+// flushes finalized data and persists the LIB as the resume point, that the resume point is
+// only rewritten when the LIB advances, and that no SetAll happens without output.
+func TestHandleBlockScopedData_NoOutput(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	mockStore := NewSimpleMockStore()
+	blockFilePath := filepath.Join(t.TempDir(), "state.block")
+
+	handler := NewSinker(mockStore, logger, blockFilePath, 0)
+	defer func() {
+		handler.Shutdown(nil)
+		<-handler.Terminated()
+	}()
+
+	cursorAt := func(blockNum, libNum uint64) *sink.Cursor {
+		return &sink.Cursor{Cursor: &bstream.Cursor{
+			Block:     bstream.NewBlockRef("blk", blockNum),
+			LIB:       bstream.NewBlockRef("lib", libNum),
+			HeadBlock: bstream.NewBlockRef("blk", blockNum),
+		}}
+	}
+	noOutputAt := func(blockNum uint64) *pbsubstreamsrpc.BlockScopedData {
+		return &pbsubstreamsrpc.BlockScopedData{Clock: &pbsubstreams.Clock{Number: blockNum, Id: "blk"}}
+	}
+
+	// No-output block with an advancing LIB: must flush and persist the LIB.
+	if err := handler.HandleBlockScopedData(context.Background(), noOutputAt(1000), nil, cursorAt(1000, 900)); err != nil {
+		t.Fatalf("HandleBlockScopedData failed: %v", err)
+	}
+	if got := mockStore.GetFlushCalls(); len(got) != 1 || got[0] != 900 {
+		t.Fatalf("Expected a single flush at lib 900, got %v", got)
+	}
+	if got := mockStore.GetSetAllCalls(); len(got) != 0 {
+		t.Errorf("Expected no SetAll on a no-output block, got %d", len(got))
+	}
+	if saved, ok := LoadLastBlockFromFile(logger, blockFilePath); !ok || saved != 900 {
+		t.Fatalf("Expected saved block 900, got %d (ok=%v)", saved, ok)
+	}
+
+	// Remove the file so we can detect whether the next call rewrites it.
+	if err := os.Remove(blockFilePath); err != nil {
+		t.Fatalf("remove block file: %v", err)
+	}
+
+	// LIB does not advance: still flushes, but must NOT rewrite the resume point.
+	if err := handler.HandleBlockScopedData(context.Background(), noOutputAt(1001), nil, cursorAt(1001, 900)); err != nil {
+		t.Fatalf("HandleBlockScopedData failed: %v", err)
+	}
+	if got := mockStore.GetFlushCalls(); len(got) != 2 {
+		t.Fatalf("Expected flush to run again on the non-advancing block, got %v", got)
+	}
+	if _, err := os.Stat(blockFilePath); !os.IsNotExist(err) {
+		t.Error("resume point should not be rewritten when the LIB does not advance")
+	}
+
+	// LIB advances again: resume point is persisted at the new LIB.
+	if err := handler.HandleBlockScopedData(context.Background(), noOutputAt(1002), nil, cursorAt(1002, 950)); err != nil {
+		t.Fatalf("HandleBlockScopedData failed: %v", err)
+	}
+	if saved, ok := LoadLastBlockFromFile(logger, blockFilePath); !ok || saved != 950 {
+		t.Fatalf("Expected saved block 950 after LIB advanced, got %d (ok=%v)", saved, ok)
 	}
 }

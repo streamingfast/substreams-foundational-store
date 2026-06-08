@@ -92,7 +92,7 @@ func TestForkAwareIfNotExist(t *testing.T) {
 
 	// Now test IfNotExist when key exists in wrapped store but not in cache
 	// Flush entry2 to wrapped store
-	if err := fa.FlushUpToBlock(100, false); err != nil {
+	if err := fa.FlushUpToBlock(100); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}
 	// Now cache should not have key2, but wrapped does
@@ -204,7 +204,7 @@ func TestCacheStore(t *testing.T) {
 	}
 
 	// Flush entries with block numbers <= 200
-	if err := cacheStore.FlushUpToBlock(200, false); err != nil {
+	if err := cacheStore.FlushUpToBlock(200); err != nil {
 		t.Fatalf("Failed to flush entries: %v", err)
 	}
 
@@ -280,5 +280,101 @@ func TestForkAwareGetFirst_WrappedNotFound(t *testing.T) {
 	// Current ForkAware implementation delegates to wrapped store, so expect NOT_FOUND when wrapped has no match
 	if resp.Entries.Entries[0].Code != pbmodel.ResponseCode_RESPONSE_CODE_NOT_FOUND {
 		t.Fatalf("expected NOT_FOUND, got %v", resp.Entries.Entries[0].Code)
+	}
+}
+
+// recordingStore wraps a mockStore and records every SetAll invocation so tests can assert
+// how FlushUpToBlock groups entries by their write mode.
+type recordingStore struct {
+	*mockStore
+	setAllCalls []recordedSetAll
+}
+
+type recordedSetAll struct {
+	ifNotExist bool
+	keys       []string
+}
+
+func (r *recordingStore) SetAll(entries []*pbmodel.Entry, IfNotExist bool, blockNumber uint64) error {
+	keys := make([]string, len(entries))
+	for i, e := range entries {
+		keys[i] = string(e.Key.Bytes)
+	}
+	r.setAllCalls = append(r.setAllCalls, recordedSetAll{ifNotExist: IfNotExist, keys: keys})
+	return r.mockStore.SetAll(entries, IfNotExist, blockNumber)
+}
+
+// TestEvictAfterBlock_Boundary verifies that EvictAfterBlock keeps the data written at exactly
+// the boundary block (the last valid block of an undo) and only drops blocks strictly after it.
+func TestEvictAfterBlock_Boundary(t *testing.T) {
+	fa := NewStore(newMockStore())
+
+	for _, blk := range []uint64{100, 200, 300} {
+		key := []byte("key" + string(rune('0'+blk/100)))
+		entry := &pbmodel.Entry{Key: &pbmodel.Key{Bytes: key}, Value: &anypb.Any{TypeUrl: "t", Value: key}}
+		if err := fa.SetAll([]*pbmodel.Entry{entry}, false, blk); err != nil {
+			t.Fatalf("set at %d: %v", blk, err)
+		}
+	}
+
+	// Undo down to (and including) block 200: blocks > 200 are reverted, 200 itself is retained.
+	if err := fa.EvictAfterBlock(200); err != nil {
+		t.Fatalf("EvictAfterBlock: %v", err)
+	}
+
+	resp, err := fa.Get(&pbservice.GetRequest{
+		BlockNumber: 1000,
+		Keys:        []*pbmodel.Key{{Bytes: []byte("key1")}, {Bytes: []byte("key2")}, {Bytes: []byte("key3")}},
+	})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if resp.Entries.Entries[0].Code != pbmodel.ResponseCode_RESPONSE_CODE_FOUND {
+		t.Errorf("block 100 should be retained")
+	}
+	if resp.Entries.Entries[1].Code != pbmodel.ResponseCode_RESPONSE_CODE_FOUND {
+		t.Errorf("boundary block 200 should be retained, got %v", resp.Entries.Entries[1].Code)
+	}
+	if resp.Entries.Entries[2].Code != pbmodel.ResponseCode_RESPONSE_CODE_NOT_FOUND {
+		t.Errorf("block 300 should be evicted, got %v", resp.Entries.Entries[2].Code)
+	}
+}
+
+// TestFlushUpToBlock_GroupsByWriteMode verifies that a single flush containing entries with
+// different IfNotExist flags is split into one wrapped SetAll per write mode.
+func TestFlushUpToBlock_GroupsByWriteMode(t *testing.T) {
+	rec := &recordingStore{mockStore: newMockStore()}
+	fa := NewStore(rec)
+
+	upsert := &pbmodel.Entry{Key: &pbmodel.Key{Bytes: []byte("upsert")}, Value: &anypb.Any{TypeUrl: "t", Value: []byte("u")}}
+	insert := &pbmodel.Entry{Key: &pbmodel.Key{Bytes: []byte("insert")}, Value: &anypb.Any{TypeUrl: "t", Value: []byte("i")}}
+
+	if err := fa.SetAll([]*pbmodel.Entry{upsert}, false, 100); err != nil {
+		t.Fatalf("set upsert: %v", err)
+	}
+	if err := fa.SetAll([]*pbmodel.Entry{insert}, true, 100); err != nil {
+		t.Fatalf("set insert: %v", err)
+	}
+
+	if err := fa.FlushUpToBlock(100); err != nil {
+		t.Fatalf("FlushUpToBlock: %v", err)
+	}
+
+	var sawUpsert, sawInsert bool
+	for _, c := range rec.setAllCalls {
+		switch {
+		case !c.ifNotExist && len(c.keys) == 1 && c.keys[0] == "upsert":
+			sawUpsert = true
+		case c.ifNotExist && len(c.keys) == 1 && c.keys[0] == "insert":
+			sawInsert = true
+		default:
+			t.Errorf("unexpected flush call: ifNotExist=%v keys=%v", c.ifNotExist, c.keys)
+		}
+	}
+	if !sawUpsert {
+		t.Error("expected an upsert (IfNotExist=false) flush call for 'upsert'")
+	}
+	if !sawInsert {
+		t.Error("expected an insert-only (IfNotExist=true) flush call for 'insert'")
 	}
 }
