@@ -15,7 +15,7 @@ service Store {
   // Get retrieves one or more values from the store at a specific block.
   // Returns entries for all requested keys, with appropriate status codes for missing keys.
   rpc Get(GetRequest) returns (GetResponse);
-  // GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested`  key.
+  // GetFirst retrieves the first (lexicographically smallest) value that is greater than or equal to each requested key.
   // Useful for range queries and finding the next key in sorted order.
   rpc GetFirst(GetRequest) returns (GetResponse);
 }
