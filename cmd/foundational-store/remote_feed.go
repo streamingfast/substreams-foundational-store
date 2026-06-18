@@ -76,11 +76,16 @@ func remoteFeedCmdE(cmd *cobra.Command, args []string) error {
 	}
 	defer badgerStore.Close()
 
+	authConfig, err := loadAuthConfig(cmd, zlog)
+	if err != nil {
+		return err
+	}
+
 	app := cli.NewApplication(cmd.Context())
 
 	server := grpc.NewRemoteFeedServer(badgerStore, zlog)
 	app.SuperviseAndStartUsing(server, func() {
-		server.Run(serverAddr)
+		server.Run(serverAddr, authConfig)
 	})
 
 	appErr := app.WaitForTermination(zlog, 5*time.Second, 15*time.Second)
@@ -102,6 +107,7 @@ func init() {
 
 	RemoteFeedCmd.MarkFlagRequired("dsn")
 	RemoteFeedCmd.MarkFlagRequired("type-url")
+	addAuthFlags(RemoteFeedCmd)
 
 	viper.BindPFlag("remote_feed.addr", RemoteFeedCmd.Flags().Lookup("addr"))
 	viper.BindPFlag("remote_feed.dsn", RemoteFeedCmd.Flags().Lookup("dsn"))

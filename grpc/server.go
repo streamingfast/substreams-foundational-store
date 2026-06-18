@@ -154,21 +154,31 @@ func (s *GrpcServer) checkReady() (bool, error) {
 	return ready, nil
 }
 
-func (s *GrpcServer) Run(addr string, opts ...grpc.ServerOption) {
+func (s *GrpcServer) Run(addr string, auth AuthConfig, opts ...grpc.ServerOption) {
 	// Create the dgrpc server with reduced per-call logging
 	grpcLogger := s.logger.Named("grpc").WithOptions(zap.IncreaseLevel(zap.WarnLevel))
-	s.dgrpcServer = factory.ServerFromOptions(
+	serverOptions := []dgrpcServer.Option{
 		dgrpcServer.WithLogger(grpcLogger),
 		dgrpcServer.WithPlainTextServer(),
 		dgrpcServer.WithGRPCServerOptions(opts...),
-		dgrpcServer.WithRegisterService(func(gs *grpc.Server) {
-			pbservice.RegisterStoreServer(gs, s)
-			pbstore.RegisterStoreServer(gs, legacy.NewServer(s.store, s.headBlockFetcher, s.logger))
-			if s.feedServer != nil {
-				pbfeed.RegisterFeedServer(gs, s.feedServer)
-			}
-		}),
-		dgrpcServer.WithHealthCheck(dgrpcServer.HealthCheckOverGRPC|dgrpcServer.HealthCheckOverHTTP, healthCheck),
+	}
+	for _, interceptor := range authUnaryInterceptors(auth, s.logger) {
+		serverOptions = append(serverOptions, dgrpcServer.WithPostUnaryInterceptor(interceptor))
+	}
+	for _, interceptor := range authStreamInterceptors(auth, s.logger) {
+		serverOptions = append(serverOptions, dgrpcServer.WithPostStreamInterceptor(interceptor))
+	}
+	s.dgrpcServer = factory.ServerFromOptions(
+		append(serverOptions,
+			dgrpcServer.WithRegisterService(func(gs *grpc.Server) {
+				pbservice.RegisterStoreServer(gs, s)
+				pbstore.RegisterStoreServer(gs, legacy.NewServer(s.store, s.headBlockFetcher, s.logger))
+				if s.feedServer != nil {
+					pbfeed.RegisterFeedServer(gs, s.feedServer)
+				}
+			}),
+			dgrpcServer.WithHealthCheck(dgrpcServer.HealthCheckOverGRPC|dgrpcServer.HealthCheckOverHTTP, healthCheck),
+		)...,
 	)
 
 	s.dgrpcServer.OnTerminated(func(err error) {
