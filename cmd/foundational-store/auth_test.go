@@ -27,6 +27,19 @@ func TestLoadAuthConfig_RequiresBothFlags(t *testing.T) {
 	require.Contains(t, err.Error(), "organization-id")
 }
 
+func TestLoadAuthConfig_TgmPlugin(t *testing.T) {
+	cmd := &cobra.Command{}
+	addAuthFlags(cmd)
+
+	require.NoError(t, cmd.Flags().Set("common-auth-plugin", "tgm://auth.staging.thegraph.market"))
+	require.NoError(t, cmd.Flags().Set("organization-id", "org-1"))
+
+	cfg, err := loadAuthConfig(cmd, zap.NewNop())
+	require.NoError(t, err)
+	require.True(t, cfg.Enabled())
+	require.Equal(t, "org-1", cfg.OrganizationID)
+}
+
 func TestLoadAuthConfig_DisabledWhenUnset(t *testing.T) {
 	cmd := &cobra.Command{}
 	addAuthFlags(cmd)

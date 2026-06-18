@@ -11,7 +11,7 @@ import (
 )
 
 func addAuthFlags(cmd *cobra.Command) {
-	cmd.Flags().String("common-auth-plugin", "", "Auth plugin URI (e.g. grpc://authenticator:9000); unset disables JWT auth")
+	cmd.Flags().String("common-auth-plugin", "", "Auth plugin URI (e.g. tgm://auth.staging.thegraph.market); unset disables JWT auth")
 	cmd.Flags().String("organization-id", "", "Reject calls when the JWT organization id does not match this value")
 }
 

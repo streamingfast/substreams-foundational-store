@@ -17,6 +17,7 @@ require (
 	github.com/streamingfast/dauth v0.0.0-20260304175046-02898e30442d
 	github.com/streamingfast/dgrpc v0.0.0-20251218133127-15b36e02a74f
 	github.com/streamingfast/logging v0.0.0-20230608130331-f22c91403091
+	github.com/streamingfast/payment-gateway v0.0.0-20251124143836-60d98e3546f5
 	github.com/streamingfast/shutter v1.5.0
 	github.com/streamingfast/substreams v1.16.7-0.20251015182509-1c9938899a91
 	github.com/stretchr/testify v1.11.1
@@ -63,6 +64,7 @@ require (
 	github.com/chzyer/readline v1.5.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20251022180443-0feb69152e9f // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.35.0 // indirect
@@ -72,6 +74,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/glog v1.2.5 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
@@ -90,6 +93,12 @@ require (
 	github.com/jhump/protoreflect v1.14.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/klauspost/compress v1.17.8 // indirect
+	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
+	github.com/lestrrat-go/httpcc v1.0.1 // indirect
+	github.com/lestrrat-go/httprc/v3 v3.0.0 // indirect
+	github.com/lestrrat-go/jwx/v3 v3.0.10 // indirect
+	github.com/lestrrat-go/option v1.0.1 // indirect
+	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
 	github.com/lithammer/dedent v1.1.0 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
@@ -116,6 +125,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/cors v1.10.0 // indirect
 	github.com/schollz/closestmatch v2.1.0+incompatible // indirect
+	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/sercand/kuberesolver/v5 v5.1.1 // indirect
 	github.com/sethvargo/go-retry v0.2.3 // indirect
 	github.com/spf13/afero v1.10.0 // indirect
@@ -125,7 +135,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/streamingfast/bstream v0.0.2-0.20250903174843-9c884c3356fd // indirect
 	github.com/streamingfast/dbin v0.9.1-0.20231117225723-59790c798e2c // indirect
-	github.com/streamingfast/derr v0.0.0-20250321151415-6b4fbbcb1bb5 // indirect
+	github.com/streamingfast/derr v0.0.0-20250814163534-bd7407bd89d7 // indirect
 	github.com/streamingfast/dmetrics v0.0.0-20250711072030-f023e918a175 // indirect
 	github.com/streamingfast/dstore v0.1.1-0.20250609173504-95368d3441ee // indirect
 	github.com/streamingfast/firehose-networks v0.2.0 // indirect
@@ -134,6 +144,7 @@ require (
 	github.com/streamingfast/sf-tracing v0.0.0-20240430173521-888827872b90 // indirect
 	github.com/subosito/gotenv v1.4.2 // indirect
 	github.com/teris-io/shortid v0.0.0-20171029131806-771a37caa5cf // indirect
+	github.com/valyala/fastjson v1.6.4 // indirect
 	github.com/yourbasic/graph v0.0.0-20210606180040-8ecfec1c2869 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

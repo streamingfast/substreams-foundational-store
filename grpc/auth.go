@@ -8,6 +8,7 @@ import (
 	dauthgrpc "github.com/streamingfast/dauth/grpc"
 	dauthgrpcmw "github.com/streamingfast/dauth/middleware/grpc"
 	dauthnull "github.com/streamingfast/dauth/null"
+	paymentGatewayAuth "github.com/streamingfast/payment-gateway/auth"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,10 +28,11 @@ func (c AuthConfig) Enabled() bool {
 	return c.Authenticator != nil
 }
 
-// RegisterAuthPlugins registers built-in dauth plugins (grpc, null).
+// RegisterAuthPlugins registers dauth plugins used by foundational-store.
 func RegisterAuthPlugins() {
 	dauthgrpc.Register()
 	dauthnull.Register()
+	paymentGatewayAuth.Register()
 }
 
 func authUnaryInterceptors(cfg AuthConfig, logger *zap.Logger) []grpc.UnaryServerInterceptor {
