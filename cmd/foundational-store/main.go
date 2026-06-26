@@ -29,6 +29,7 @@ func init() {
 	// Add commands
 	rootCmd.AddCommand(GetCmd)
 	rootCmd.AddCommand(ServerCmd)
+	rootCmd.AddCommand(RemoteFeedCmd)
 }
 
 func initConfig() {

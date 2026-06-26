@@ -3,6 +3,7 @@ package badger
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/streamingfast/substreams-foundational-store/store"
@@ -15,6 +16,10 @@ type Store struct {
 	typeUrl    string
 	numWorkers int
 	logger     *zap.Logger
+
+	// ready caches the persisted readiness flag in memory. It is loaded from
+	// badger at startup and kept in sync on every SetReady call.
+	ready atomic.Bool
 }
 
 // NewStore creates a new Badger foundational-store
@@ -48,9 +53,18 @@ func NewStore(dsn *store.DSN, typeUrl string, numWorkers int, logger *zap.Logger
 		logger:     logger,
 	}
 
+	// Load the persisted readiness flag into memory once at startup.
+	ready, err := store.readReadyFromDB()
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to load readiness flag: %w", err)
+	}
+	store.ready.Store(ready)
+
 	store.logger.Info("badger foundational-store initialized",
 		zap.String("path", dbPath),
-		zap.Int("workers", store.numWorkers))
+		zap.Int("workers", store.numWorkers),
+		zap.Bool("ready", ready))
 
 	return store, nil
 }

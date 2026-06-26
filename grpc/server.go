@@ -3,12 +3,15 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	dgrpcServer "github.com/streamingfast/dgrpc/server"
 	"github.com/streamingfast/dgrpc/server/factory"
 	"github.com/streamingfast/shutter"
+	feed "github.com/streamingfast/substreams-foundational-store/grpc/feed"
 	legacy "github.com/streamingfast/substreams-foundational-store/grpc/legacy"
+	pbfeed "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/feed/v2"
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbstore "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v1"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
@@ -24,10 +27,24 @@ type GrpcServer struct {
 	store            store.Store
 	dgrpcServer      dgrpcServer.Server
 	headBlockFetcher FetchHeadBlock
+	readyFunc        CheckReady
+	feedServer       pbfeed.FeedServer
 	logger           *zap.Logger
 }
 
 type FetchHeadBlock func() uint64
+
+// CheckReady reports whether the store is ready to serve reads. When it returns
+// false, read requests respond with block_reached = false.
+type CheckReady func() (bool, error)
+
+// RemoteFeedStore is the store backend used in "remote-feed" ingest mode. It
+// must support reads, batch writes, and a persisted readiness flag.
+type RemoteFeedStore interface {
+	store.Store
+	SetReady(ready bool) error
+	IsReady() (bool, error)
+}
 
 // NewStoreServer creates a new StoreServer with the given foundational-store
 func NewStoreServer(store store.Store, headBlockFetcher FetchHeadBlock, logger *zap.Logger) *GrpcServer {
@@ -40,8 +57,29 @@ func NewStoreServer(store store.Store, headBlockFetcher FetchHeadBlock, logger *
 	}
 }
 
+// NewRemoteFeedServer creates a server for the "remote-feed" ingest mode. It
+// serves the read service (Get/GetFirst) gated by the persisted readiness flag,
+// alongside the Feed ingest service (Set/SetReady), on the same address.
+func NewRemoteFeedServer(store RemoteFeedStore, logger *zap.Logger) *GrpcServer {
+	return &GrpcServer{
+		Shutter:          shutter.New(),
+		store:            store,
+		dgrpcServer:      nil,
+		headBlockFetcher: func() uint64 { return math.MaxUint64 },
+		readyFunc:        store.IsReady,
+		feedServer:       feed.NewServer(store, logger),
+		logger:           logger,
+	}
+}
+
 // Get implements the unified Get method of the Store service (multi-keys)
 func (s *GrpcServer) Get(ctx context.Context, req *pbservice.GetRequest) (*pbservice.GetResponse, error) {
+	if ready, err := s.checkReady(); err != nil {
+		return nil, err
+	} else if !ready {
+		return &pbservice.GetResponse{BlockReached: false}, nil
+	}
+
 	headBlock := s.headBlockFetcher()
 	if headBlock < req.BlockNumber {
 		return &pbservice.GetResponse{BlockReached: false}, nil
@@ -73,6 +111,12 @@ func (s *GrpcServer) Get(ctx context.Context, req *pbservice.GetRequest) (*pbser
 
 // GetFirst implements the unified GetFirst method of the Store service (multi-keys)
 func (s *GrpcServer) GetFirst(ctx context.Context, req *pbservice.GetRequest) (*pbservice.GetResponse, error) {
+	if ready, err := s.checkReady(); err != nil {
+		return nil, err
+	} else if !ready {
+		return &pbservice.GetResponse{BlockReached: false}, nil
+	}
+
 	headBlock := s.headBlockFetcher()
 	if headBlock < req.BlockNumber {
 		return &pbservice.GetResponse{BlockReached: false}, nil
@@ -97,18 +141,44 @@ func (s *GrpcServer) GetFirst(ctx context.Context, req *pbservice.GetRequest) (*
 	return r, nil
 }
 
-func (s *GrpcServer) Run(addr string, opts ...grpc.ServerOption) {
+// checkReady reports the store readiness. When no readiness function is
+// configured (normal serving mode), the store is always considered ready.
+func (s *GrpcServer) checkReady() (bool, error) {
+	if s.readyFunc == nil {
+		return true, nil
+	}
+	ready, err := s.readyFunc()
+	if err != nil {
+		return false, fmt.Errorf("checking store readiness: %w", err)
+	}
+	return ready, nil
+}
+
+func (s *GrpcServer) Run(addr string, auth AuthConfig, opts ...grpc.ServerOption) {
 	// Create the dgrpc server with reduced per-call logging
 	grpcLogger := s.logger.Named("grpc").WithOptions(zap.IncreaseLevel(zap.WarnLevel))
-	s.dgrpcServer = factory.ServerFromOptions(
+	serverOptions := []dgrpcServer.Option{
 		dgrpcServer.WithLogger(grpcLogger),
 		dgrpcServer.WithPlainTextServer(),
 		dgrpcServer.WithGRPCServerOptions(opts...),
-		dgrpcServer.WithRegisterService(func(gs *grpc.Server) {
-			pbservice.RegisterStoreServer(gs, s)
-			pbstore.RegisterStoreServer(gs, legacy.NewServer(s.store, s.headBlockFetcher, s.logger))
-		}),
-		dgrpcServer.WithHealthCheck(dgrpcServer.HealthCheckOverGRPC|dgrpcServer.HealthCheckOverHTTP, healthCheck),
+	}
+	for _, interceptor := range authUnaryInterceptors(auth, s.logger) {
+		serverOptions = append(serverOptions, dgrpcServer.WithPostUnaryInterceptor(interceptor))
+	}
+	for _, interceptor := range authStreamInterceptors(auth, s.logger) {
+		serverOptions = append(serverOptions, dgrpcServer.WithPostStreamInterceptor(interceptor))
+	}
+	s.dgrpcServer = factory.ServerFromOptions(
+		append(serverOptions,
+			dgrpcServer.WithRegisterService(func(gs *grpc.Server) {
+				pbservice.RegisterStoreServer(gs, s)
+				pbstore.RegisterStoreServer(gs, legacy.NewServer(s.store, s.headBlockFetcher, s.logger))
+				if s.feedServer != nil {
+					pbfeed.RegisterFeedServer(gs, s.feedServer)
+				}
+			}),
+			dgrpcServer.WithHealthCheck(dgrpcServer.HealthCheckOverGRPC|dgrpcServer.HealthCheckOverHTTP, healthCheck),
+		)...,
 	)
 
 	s.dgrpcServer.OnTerminated(func(err error) {

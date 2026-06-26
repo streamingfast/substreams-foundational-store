@@ -184,10 +184,15 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	authConfig, err := loadAuthConfig(cmd, zlog)
+	if err != nil {
+		return err
+	}
+
 	server := grpc.NewStoreServer(storeImpl, headBlock, zlog)
 
 	app.SuperviseAndStartUsing(server, func() {
-		server.Run(serverAddr)
+		server.Run(serverAddr, authConfig)
 	})
 
 	if storeManagerAddr != "" {
@@ -239,6 +244,7 @@ func init() {
 
 	ServerCmd.MarkFlagRequired("dsn")
 	ServerCmd.MarkFlagRequired("type-url")
+	addAuthFlags(ServerCmd)
 
 	viper.BindPFlag("server.addr", ServerCmd.Flags().Lookup("addr"))
 	viper.BindPFlag("server.dsn", ServerCmd.Flags().Lookup("dsn"))

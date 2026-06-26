@@ -1,0 +1,43 @@
+// Protocol buffer definitions for the Substreams Foundational Store remote feed.
+// This package defines the ingest service used by external services to populate
+// the foundational store directly over gRPC, as an alternative to running a
+// Substreams sink. Data pushed through this service is considered already final.
+
+syntax = "proto3";
+
+import "sf/substreams/foundational-store/model/v2/model.proto";
+
+package sf.substreams.foundational_store.feed.v2;
+
+option go_package = "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/feed/v2;pbfeed";
+
+// Feed service is the ingest interface for the "remote-feed" mode. External
+// services call into this service to write entries into the store instead of
+// the store consuming the output of a Substreams.
+service Feed {
+  // Set writes a batch of entries into the store. The data is treated as final
+  // and is persisted immediately (latest-value semantics, no fork-awareness).
+  rpc Set(SetRequest) returns (SetResponse);
+  // SetReady stores the readiness state of the store. While the store is not
+  // ready, read requests (Get/GetFirst) return block_reached = false. The state
+  // is persisted and survives restarts.
+  rpc SetReady(SetReadyRequest) returns (SetReadyResponse);
+}
+
+// SetRequest carries the batch of entries to ingest.
+message SetRequest {
+  // The entries to write, together with the if_not_exist flag.
+  model.v2.SinkEntries entries = 1;
+}
+
+// SetResponse is returned once the entries have been persisted.
+message SetResponse {}
+
+// SetReadyRequest carries the new readiness state to persist.
+message SetReadyRequest {
+  // Whether the store should be considered ready to serve reads.
+  bool ready = 1;
+}
+
+// SetReadyResponse is returned once the readiness state has been persisted.
+message SetReadyResponse {}
