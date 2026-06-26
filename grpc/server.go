@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	dgrpcServer "github.com/streamingfast/dgrpc/server"
@@ -25,7 +26,8 @@ type GrpcServer struct {
 	*shutter.Shutter
 	pbservice.UnimplementedStoreServer
 	store            store.Store
-	dgrpcServer      dgrpcServer.Server
+	dgrpcServersLock sync.Mutex
+	dgrpcServers     []dgrpcServer.Server
 	headBlockFetcher FetchHeadBlock
 	readyFunc        CheckReady
 	feedServer       pbfeed.FeedServer
@@ -51,7 +53,6 @@ func NewStoreServer(store store.Store, headBlockFetcher FetchHeadBlock, logger *
 	return &GrpcServer{
 		Shutter:          shutter.New(),
 		store:            store,
-		dgrpcServer:      nil,
 		headBlockFetcher: headBlockFetcher,
 		logger:           logger,
 	}
@@ -64,7 +65,6 @@ func NewRemoteFeedServer(store RemoteFeedStore, logger *zap.Logger) *GrpcServer 
 	return &GrpcServer{
 		Shutter:          shutter.New(),
 		store:            store,
-		dgrpcServer:      nil,
 		headBlockFetcher: func() uint64 { return math.MaxUint64 },
 		readyFunc:        store.IsReady,
 		feedServer:       feed.NewServer(store, logger),
@@ -154,7 +154,28 @@ func (s *GrpcServer) checkReady() (bool, error) {
 	return ready, nil
 }
 
+// Run launches a single listener on addr with the given auth config. It blocks
+// until the underlying gRPC server terminates.
 func (s *GrpcServer) Run(addr string, auth AuthConfig, opts ...grpc.ServerOption) {
+	s.newServer(addr, auth, opts...).Launch(addr)
+}
+
+// RunWithInternal launches the public listener on addr (using auth) plus an
+// internal listener on internalAddr (using internalAuth, typically a trust://
+// plugin that accepts forwarded x-organization-id/x-api-key-id headers from
+// internal callers such as Substreams tier1). Both listeners share the same
+// service handlers and lifecycle. The internal listener runs in its own
+// goroutine; the public listener blocks like Run.
+func (s *GrpcServer) RunWithInternal(addr string, auth AuthConfig, internalAddr string, internalAuth AuthConfig, opts ...grpc.ServerOption) {
+	internal := s.newServer(internalAddr, internalAuth, opts...)
+	go internal.Launch(internalAddr)
+
+	s.newServer(addr, auth, opts...).Launch(addr)
+}
+
+// newServer builds (without launching) a dgrpc server bound to the given auth
+// config, registers it for shutdown tracking, and returns it.
+func (s *GrpcServer) newServer(addr string, auth AuthConfig, opts ...grpc.ServerOption) dgrpcServer.Server {
 	// Create the dgrpc server with reduced per-call logging
 	grpcLogger := s.logger.Named("grpc").WithOptions(zap.IncreaseLevel(zap.WarnLevel))
 	serverOptions := []dgrpcServer.Option{
@@ -168,7 +189,7 @@ func (s *GrpcServer) Run(addr string, auth AuthConfig, opts ...grpc.ServerOption
 	for _, interceptor := range authStreamInterceptors(auth, s.logger) {
 		serverOptions = append(serverOptions, dgrpcServer.WithPostStreamInterceptor(interceptor))
 	}
-	s.dgrpcServer = factory.ServerFromOptions(
+	srv := factory.ServerFromOptions(
 		append(serverOptions,
 			dgrpcServer.WithRegisterService(func(gs *grpc.Server) {
 				pbservice.RegisterStoreServer(gs, s)
@@ -181,11 +202,15 @@ func (s *GrpcServer) Run(addr string, auth AuthConfig, opts ...grpc.ServerOption
 		)...,
 	)
 
-	s.dgrpcServer.OnTerminated(func(err error) {
+	srv.OnTerminated(func(err error) {
 		s.Shutter.Shutdown(err)
 	})
 
-	s.dgrpcServer.Launch(addr)
+	s.dgrpcServersLock.Lock()
+	s.dgrpcServers = append(s.dgrpcServers, srv)
+	s.dgrpcServersLock.Unlock()
+
+	return srv
 }
 
 func healthCheck(ctx context.Context) (isReady bool, out interface{}, err error) {
@@ -203,7 +228,11 @@ func healthCheck(ctx context.Context) (isReady bool, out interface{}, err error)
 }
 
 func (s *GrpcServer) Shutdown(err error) {
-	if server := s.dgrpcServer; server != nil {
+	s.dgrpcServersLock.Lock()
+	servers := s.dgrpcServers
+	s.dgrpcServersLock.Unlock()
+
+	for _, server := range servers {
 		server.Shutdown(15 * time.Second)
 	}
 
