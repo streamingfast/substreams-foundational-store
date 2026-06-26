@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/streamingfast/cli/sflags"
 	"github.com/streamingfast/dauth"
 	"github.com/streamingfast/substreams-foundational-store/grpc"
 	"go.uber.org/zap"
@@ -18,17 +19,8 @@ func addAuthFlags(cmd *cobra.Command) {
 }
 
 func loadAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, error) {
-	plugin, err := cmd.Flags().GetString("common-auth-plugin")
-	if err != nil {
-		return grpc.AuthConfig{}, err
-	}
-	orgID, err := cmd.Flags().GetString("organization-id")
-	if err != nil {
-		return grpc.AuthConfig{}, err
-	}
-
-	plugin = strings.TrimSpace(plugin)
-	orgID = strings.TrimSpace(orgID)
+	plugin := strings.TrimSpace(sflags.MustGetString(cmd, "common-auth-plugin"))
+	orgID := strings.TrimSpace(sflags.MustGetString(cmd, "organization-id"))
 
 	if plugin == "" {
 		if orgID != "" {
@@ -61,27 +53,14 @@ func loadAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, er
 // identity headers (x-organization-id, x-api-key-id) from internal callers are
 // trusted without an end-user JWT. Organization scoping still applies: when
 // --organization-id is set, the trusted x-organization-id must match it.
-func loadInternalAuthConfig(cmd *cobra.Command, logger *zap.Logger) (cfg grpc.AuthConfig, addr string, err error) {
-	addr, err = cmd.Flags().GetString("internal-addr")
-	if err != nil {
-		return grpc.AuthConfig{}, "", err
-	}
-	addr = strings.TrimSpace(addr)
+func loadInternalAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, string, error) {
+	addr := strings.TrimSpace(sflags.MustGetString(cmd, "internal-addr"))
 	if addr == "" {
 		return grpc.AuthConfig{}, "", nil
 	}
 
-	plugin, err := cmd.Flags().GetString("internal-auth-plugin")
-	if err != nil {
-		return grpc.AuthConfig{}, "", err
-	}
-	plugin = strings.TrimSpace(plugin)
-
-	orgID, err := cmd.Flags().GetString("organization-id")
-	if err != nil {
-		return grpc.AuthConfig{}, "", err
-	}
-	orgID = strings.TrimSpace(orgID)
+	plugin := strings.TrimSpace(sflags.MustGetString(cmd, "internal-auth-plugin"))
+	orgID := strings.TrimSpace(sflags.MustGetString(cmd, "organization-id"))
 
 	if plugin == "" {
 		// Internal listener explicitly running without any auth (local dev).
