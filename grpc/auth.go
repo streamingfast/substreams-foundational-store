@@ -3,11 +3,13 @@ package grpc
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/streamingfast/dauth"
 	dauthgrpc "github.com/streamingfast/dauth/grpc"
 	dauthgrpcmw "github.com/streamingfast/dauth/middleware/grpc"
 	dauthnull "github.com/streamingfast/dauth/null"
+	dauthtrust "github.com/streamingfast/dauth/trust"
 	paymentGatewayAuth "github.com/streamingfast/payment-gateway/auth"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -28,11 +30,23 @@ func (c AuthConfig) Enabled() bool {
 	return c.Authenticator != nil
 }
 
-// RegisterAuthPlugins registers dauth plugins used by foundational-store.
+var registerAuthPluginsOnce sync.Once
+
+// RegisterAuthPlugins registers dauth plugins used by foundational-store. It is
+// safe to call multiple times (public and internal listeners both invoke it).
+//
+// The "trust" plugin is used by the internal listener: it trusts identity
+// headers (e.g. x-organization-id, x-api-key-id) forwarded by internal callers
+// such as Substreams tier1, which authenticate the end user upstream and only
+// propagate the resulting trusted headers (no end-user JWT/api-key reaches the
+// internal hop).
 func RegisterAuthPlugins() {
-	dauthgrpc.Register()
-	dauthnull.Register()
-	paymentGatewayAuth.Register()
+	registerAuthPluginsOnce.Do(func() {
+		dauthgrpc.Register()
+		dauthnull.Register()
+		dauthtrust.Register()
+		paymentGatewayAuth.Register()
+	})
 }
 
 func authUnaryInterceptors(cfg AuthConfig, logger *zap.Logger) []grpc.UnaryServerInterceptor {

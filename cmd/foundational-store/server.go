@@ -189,9 +189,19 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	internalAuthConfig, internalAddr, err := loadInternalAuthConfig(cmd, zlog)
+	if err != nil {
+		return err
+	}
+
 	server := grpc.NewStoreServer(storeImpl, headBlock, zlog)
 
 	app.SuperviseAndStartUsing(server, func() {
+		if internalAddr != "" {
+			zlog.Info("serving public and internal listeners", zap.String("public_addr", serverAddr), zap.String("internal_addr", internalAddr))
+			server.RunWithInternal(serverAddr, authConfig, internalAddr, internalAuthConfig)
+			return
+		}
 		server.Run(serverAddr, authConfig)
 	})
 
