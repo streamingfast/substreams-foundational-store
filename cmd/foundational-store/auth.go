@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/streamingfast/cli/sflags"
 	"github.com/streamingfast/dauth"
 	"github.com/streamingfast/substreams-foundational-store/grpc"
 	"go.uber.org/zap"
@@ -12,21 +13,14 @@ import (
 
 func addAuthFlags(cmd *cobra.Command) {
 	cmd.Flags().String("common-auth-plugin", "", "Auth plugin URI (e.g. tgm://auth.staging.thegraph.market); unset disables JWT auth")
-	cmd.Flags().String("organization-id", "", "Reject calls when the JWT organization id does not match this value")
+	cmd.Flags().String("organization-id", "", "Reject calls when the organization id does not match this value")
+	cmd.Flags().String("internal-addr", "", "When set, serve an additional internal listener on this address using --internal-auth-plugin (for internal callers such as Substreams tier1 that forward trusted identity headers instead of an end-user JWT)")
+	cmd.Flags().String("internal-auth-plugin", "trust://?allowed=x-organization-id,x-user-id,x-api-key-id", "Auth plugin URI for the internal listener; the default trust:// plugin trusts the listed forwarded identity headers")
 }
 
 func loadAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, error) {
-	plugin, err := cmd.Flags().GetString("common-auth-plugin")
-	if err != nil {
-		return grpc.AuthConfig{}, err
-	}
-	orgID, err := cmd.Flags().GetString("organization-id")
-	if err != nil {
-		return grpc.AuthConfig{}, err
-	}
-
-	plugin = strings.TrimSpace(plugin)
-	orgID = strings.TrimSpace(orgID)
+	plugin := strings.TrimSpace(sflags.MustGetString(cmd, "common-auth-plugin"))
+	orgID := strings.TrimSpace(sflags.MustGetString(cmd, "organization-id"))
 
 	if plugin == "" {
 		if orgID != "" {
@@ -49,4 +43,38 @@ func loadAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, er
 		Authenticator:  authenticator,
 		OrganizationID: orgID,
 	}, nil
+}
+
+// loadInternalAuthConfig builds the auth config for the optional internal
+// listener. It returns an empty address when --internal-addr is unset, in which
+// case no internal listener should be started.
+//
+// The internal listener typically uses a trust:// plugin so that forwarded
+// identity headers (x-organization-id, x-api-key-id) from internal callers are
+// trusted without an end-user JWT. Organization scoping still applies: when
+// --organization-id is set, the trusted x-organization-id must match it.
+func loadInternalAuthConfig(cmd *cobra.Command, logger *zap.Logger) (grpc.AuthConfig, string, error) {
+	addr := strings.TrimSpace(sflags.MustGetString(cmd, "internal-addr"))
+	if addr == "" {
+		return grpc.AuthConfig{}, "", nil
+	}
+
+	plugin := strings.TrimSpace(sflags.MustGetString(cmd, "internal-auth-plugin"))
+	orgID := strings.TrimSpace(sflags.MustGetString(cmd, "organization-id"))
+
+	if plugin == "" {
+		// Internal listener explicitly running without any auth (local dev).
+		return grpc.AuthConfig{}, addr, nil
+	}
+
+	grpc.RegisterAuthPlugins()
+	authenticator, err := dauth.New(plugin, logger)
+	if err != nil {
+		return grpc.AuthConfig{}, "", fmt.Errorf("initialize internal auth plugin: %w", err)
+	}
+
+	return grpc.AuthConfig{
+		Authenticator:  authenticator,
+		OrganizationID: orgID,
+	}, addr, nil
 }
