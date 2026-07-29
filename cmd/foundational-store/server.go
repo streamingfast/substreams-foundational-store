@@ -153,28 +153,31 @@ func serverCmdE(cmd *cobra.Command, args []string) error {
 		sinker := sink.NewSinker(storeImpl, zlog, cursorFilePath, cursor)
 		headBlock = sinker.HeadBlock
 
-		conn, err := grpcclient.Dial(storeManagerAddr, grpcclient.WithInsecure())
-		if err != nil {
-			return fmt.Errorf("dialing store manager: %w", err)
-		}
-		defer conn.Close()
-
-		client := pbrouter.NewStoreManagerClient(conn)
-
-		ping = func() {
-			zlog.Info("pinging store manager", zap.String("module_output_hash", substreamsClient.OutputModuleHash()), zap.String("network", substreamsClient.Pkg.Network))
-			resp, err := client.Ping(cmd.Context(), &pbrouter.PingRequest{
-				ModuleOutputHash: substreamsClient.OutputModuleHash(),
-				Network:          substreamsClient.Pkg.Network,
-			})
+		// Store manager is optional: only dial and ping when an address is provided.
+		if storeManagerAddr != "" {
+			conn, err := grpcclient.Dial(storeManagerAddr, grpcclient.WithInsecure())
 			if err != nil {
-				zlog.Error("ping failed", zap.Error(err))
-			} else if resp == nil {
-				zlog.Error("ping failed: nil response")
-			} else if resp.Code == pbrouter.PingResponse_pong {
-				zlog.Info("ping successful")
-			} else {
-				zlog.Error("ping failed", zap.String("code", resp.Code.String()), zap.String("reason", resp.GetFailureReason()))
+				return fmt.Errorf("dialing store manager: %w", err)
+			}
+			defer conn.Close()
+
+			client := pbrouter.NewStoreManagerClient(conn)
+
+			ping = func() {
+				zlog.Info("pinging store manager", zap.String("module_output_hash", substreamsClient.OutputModuleHash()), zap.String("network", substreamsClient.Pkg.Network))
+				resp, err := client.Ping(cmd.Context(), &pbrouter.PingRequest{
+					ModuleOutputHash: substreamsClient.OutputModuleHash(),
+					Network:          substreamsClient.Pkg.Network,
+				})
+				if err != nil {
+					zlog.Error("ping failed", zap.Error(err))
+				} else if resp == nil {
+					zlog.Error("ping failed: nil response")
+				} else if resp.Code == pbrouter.PingResponse_pong {
+					zlog.Info("ping successful")
+				} else {
+					zlog.Error("ping failed", zap.String("code", resp.Code.String()), zap.String("reason", resp.GetFailureReason()))
+				}
 			}
 		}
 
@@ -249,7 +252,7 @@ func init() {
 	ServerCmd.Flags().Duration("max-batch-time", 30*time.Second, "Maximum time to wait before flushing a partial batch")
 	ServerCmd.Flags().Int("flush-queue-size", 3, "Size of the async flush queue buffer")
 	ServerCmd.Flags().Bool("no-time-traversal", false, "Disable time traversal mode and use original badger store implementation")
-	ServerCmd.Flags().String("store-manager-address", "", "Address of the store manager to ping every 30 seconds")
+	ServerCmd.Flags().String("store-manager-address", "", "Optional address of the store manager to ping every 30 seconds; if omitted, store manager pings are disabled")
 	ServerCmd.Flags().Duration("startup-delay", 0, "Delay before starting the server (e.g. 5s, 1m)")
 
 	ServerCmd.MarkFlagRequired("dsn")
