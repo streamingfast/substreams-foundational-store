@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package sf.substreams.example.v1;
+
+// Sample value type used by the Remote Feed Hosted Store client guide.
+message TestValue {
+  string value = 1;
+}

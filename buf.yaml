@@ -3,4 +3,7 @@ deps:
   - buf.build/streamingfast/substreams-sink-sql
 modules:
   - path: proto
-    name: buf.build/streamingfast/substreams-foundational-store 
+    name: buf.build/streamingfast/substreams-foundational-store
+    # Guide-only sample type; not part of the published store API.
+    excludes:
+      - proto/sf/substreams/example 
