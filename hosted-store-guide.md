@@ -1,8 +1,14 @@
-# Hosted Store — Client Guide
+# Remote Feed Hosted Store — Client Guide
 
-A **Hosted Store** is a managed, block‑aware key/value store that StreamingFast runs for
-you. You write key/value entries into it, and your Substreams modules — or any gRPC
-client — read those entries back at a given block height.
+A **Remote Feed Hosted Store** is a managed, block‑aware key/value store that
+StreamingFast runs for you. You write key/value entries into it over gRPC, and your
+Substreams modules — or any gRPC client — read those entries back at a given block
+height.
+
+This guide is for the **Remote feed** flavor of a Hosted Store: you (or another
+service) push values in. The create wizard also offers a **Substreams feed** mode,
+where a package reads the chain and populates the store for you — that path is not
+covered here.
 
 This guide shows you how to:
 
@@ -22,31 +28,44 @@ A hosted store is a **key → value** map with a few blockchain‑specific prope
 - **Keys** are raw `bytes` — they can be a string, a hash, an address, or any composite key you choose.
 - **Values** are a `google.protobuf.Any` — i.e. any protobuf message you define, tagged with its `@type`.
 - **Block‑aware reads** — every read is performed *at a block number*. The store tells you whether it has reached that block yet (`block_reached`), so your reads stay deterministic alongside the chain.
-- **Readiness** — a store can be marked not‑ready while it's still being populated; reads then return `block_reached = false` until you flip it ready.
+- **Readiness** — a store starts **not ready**. Direct `Get`/`GetFirst` then return `block_reached = false` (even if the keys are already written). A Substreams that queries a not‑ready store **hangs** until you flip it ready with `Feed.SetReady`.
 
 You populate a hosted store by writing entries directly over gRPC with the `Feed.Set` call
-(the **remote feed** flow). Data written this way is treated as **already final**. Reading is
-the same whether you query the store directly or from a Substreams module.
+(the **remote feed** flow). Data written this way is treated as **already final**. You can
+query the same keys directly over gRPC or from a Substreams module — but a Substreams
+**hangs** if the store is not marked ready (see below), while a direct `Get` returns
+immediately with `block_reached = false`.
 
 ---
 
-## 2. Create a hosted store
+## 2. Create a Remote Feed Hosted Store
 
-Hosted stores are provisioned through [**The Graph Market**](http://thegraph.market), under the
-**Hosted Sink** section:
+Stores are provisioned through [**The Graph Market**](https://thegraph.market), under
+**Hosted Services**:
 
-- [https://thegraph.market/sinks/new](https://thegraph.market/sinks/new) — create a new sink. Click the **Hosted Store** button.
-- [https://thegraph.market/sinks](https://thegraph.market/sinks) — list your sinks and copy a store's sink ID (the deployment ID).
+- [https://thegraph.market/sinks/new](https://thegraph.market/sinks/new) — create a new service.
+  1. Choose **Hosted Store**.
+  2. Set the feed mode to **Remote feed** (off‑chain writes over gRPC). Do **not** pick
+     **Substreams feed** unless a package should populate the store from the chain.
+  3. Give it a **name** and a **Type URL**.
+- [https://thegraph.market/sinks](https://thegraph.market/sinks) — list your services and copy
+  the store's deployment ID.
 
-Creating a hosted store only requires two fields:
+Creating a Remote Feed Hosted Store only requires two fields:
 
 - **Name** — a label for the store.
-- **Type URL** — the protobuf type of the values you'll store (e.g. `sf.substreams.example.v1.TestValue`).
+- **Type URL** — the fully‑qualified protobuf type of the values you'll feed in
+  (e.g. `sf.substreams.example.v1.TestValue`).
 
-When you create one you get back a **deployment ID** (a UUID, e.g. `fdfa1b15-8b20-438c-a0b7-41278b4fdacf`). That ID is used in two places:
+When you create one you get back a **deployment ID** (e.g. `depxado8480c1026b3edb7f`).
+That ID is used in two places:
 
 - as the **hostname** of the store's gRPC endpoint, and
 - as the **store reference** in a Substreams manifest.
+
+A freshly created store's endpoint is not reachable immediately — it usually takes
+**5 to 10 minutes**. Until then calls fail with a gateway error such as
+`fault filter abort`. Wait and retry.
 
 ### Endpoint convention
 
@@ -56,24 +75,27 @@ Once deployed, the store is reachable at:
 <deployment-id>.hs.streamingfast.io:443
 ```
 
+Example: `depxado8480c1026b3edb7f.hs.streamingfast.io:443`
+
 - TLS on port **443**, gRPC over HTTP/2.
-- Authenticated with a **Bearer JWT** (see next section).
+- Authenticated with an **API key** (see next section).
 
 ---
 
 ## 3. Authentication
 
-Calls to the store carry a StreamingFast **JWT** in the gRPC `authorization` metadata:
+Calls to the store carry a StreamingFast **API key** in the gRPC `x-api-key` metadata:
 
 ```
-authorization: Bearer <jwt>
+x-api-key: <api-key>
 ```
 
-An API key for the hosted store is **created automatically** when you create the store — you don't
-have to make one yourself.
+An API key is **created automatically** when you create the store — you don't have to
+make one yourself. You can also use any key from
+[https://thegraph.market/api-keys](https://thegraph.market/api-keys).
 
-You get your API token (JWT) from [https://thegraph.market/api-keys](https://thegraph.market/api-keys):
-find the key and click its **Refresh** button to mint a fresh token.
+Keys start with `hosted`, `server`, `web`, `worker`, or `mobile`. The examples below
+use `$SF_API_KEY`.
 
 ---
 
@@ -108,7 +130,7 @@ grpcurl \
   --proto sf/substreams/foundational-store/feed/v2/feed.proto \
   --proto sf/substreams/foundational-store/model/v2/model.proto \
   --proto sf/substreams/example/v1/example.proto \
-  -H "authorization: Bearer $SF_TOKEN" \
+  -H "x-api-key: $SF_API_KEY" \
   -d '{
     "entries": {
       "entries": [{
@@ -132,15 +154,24 @@ Notes:
 
 ### Marking the store ready
 
-While a store is being populated you can hold reads off with `Feed.SetReady`:
+A new store is **not ready**. Hold reads off while you populate it, then flip the flag with
+`Feed.SetReady`:
 
 ```bash
 grpcurl ... -d '{ "ready": true }' \
   <endpoint> sf.substreams.foundational_store.feed.v2.Feed/SetReady
 ```
 
-Until `ready = true`, `Get`/`GetFirst` return `block_reached = false`. A Substreams module that
-queries a store marked as not ready will **wait** until the store is made ready before proceeding.
+Until you call `SetReady` with `ready = true`:
+
+- Direct `Get`/`GetFirst` return `block_reached = false` — even if the keys are already written.
+- A Substreams that queries the store **hangs**. It does not error, skip, or time out; the
+  runtime treats `block_reached = false` as "try again later" and waits until the store is
+  marked ready, then continues.
+
+Call `SetReady` only after the data consumers need is written. If a Substreams appears stuck
+on the first block after you added a hosted‑store input, the store is almost certainly still
+not ready.
 
 ---
 
@@ -171,7 +202,8 @@ grpcurl \
   --import-path "./proto" \
   --proto sf/substreams/foundational-store/service/v2/service.proto \
   --proto sf/substreams/foundational-store/model/v2/model.proto \
-  -H "authorization: Bearer $SF_TOKEN" \
+  --proto sf/substreams/example/v1/example.proto \
+  -H "x-api-key: $SF_API_KEY" \
   -d '{
     "block_number": "100",
     "keys": [{ "bytes": "dGVzdC1rZXktMQ==" }]
@@ -230,7 +262,7 @@ deps:
   - buf.build/googleapis/googleapis
 ```
 
-#### 2. Query it from Rust
+#### 2. Query from a Substreams
 
 The store is injected into your handler as a `FoundationalStore`. Call `get` with a slice of
 keys; you get back a `QueriedEntries`.
@@ -274,6 +306,11 @@ fn map_query_test_store(
 The read is automatically performed at the block currently being processed, so results stay in
 sync with the stream.
 
+> **Not ready ⇒ hang.** If the store is not marked ready, `store.get(...)` does not return.
+> The Substreams stalls at that block until someone calls `Feed.SetReady` with `ready = true`.
+> This is intentional: the runtime treats `block_reached = false` as "try again later", not
+> as a miss. Direct `Get`/`GetFirst` still return immediately with `block_reached = false`.
+
 #### 3. Build and run
 
 ```bash
@@ -289,10 +326,13 @@ substreams run substreams.yaml map_query_test_store \
 
 ## 6. End‑to‑end checklist
 
-1. **Create** a remote‑feed hosted store in [The Graph Market](http://thegraph.market) → note the **deployment ID**.
-2. **Get a JWT** from your API key.
-3. **Write** your entries with `Feed.Set` (and `Feed.SetReady` when ready to be consumed).
-4. **Read** them either directly with `Store.Get` / `Store.GetFirst`, or by adding
+1. **Create** a Remote Feed Hosted Store in [The Graph Market](https://thegraph.market)
+   (**Hosted Services** → **Hosted Store** → **Remote feed**) → note the **deployment ID**.
+2. **Wait** until the endpoint answers (often 5–10 minutes after create).
+3. **Authenticate** with an API key (`x-api-key`).
+4. **Write** your entries with `Feed.Set`, then call `Feed.SetReady`. A Substreams that
+   queries the store before that **hangs** until you mark it ready.
+5. **Read** them either directly with `Store.Get` / `Store.GetFirst`, or by adding
    `foundational-store: <deployment-id>@<version>` to a Substreams module and calling
    `store.get(...)`.
 
