@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Changed
-- Update the Remote Feed Hosted Store client guide: Graph Market create flow, API-key auth, endpoint warmup, and that a Substreams querying a not-ready store hangs until `SetReady`.
+### Removed
+- Dropped the in-repo hosted store client guide. Hosted-store usage is documented at [substreams.dev](https://docs.substreams.dev).
 
 ### Added
 - Optional internal gRPC listener via `--internal-addr` that authenticates with a configurable plugin (`--internal-auth-plugin`, default `trust://?allowed=x-organization-id,x-user-id,x-api-key-id`). This lets internal callers such as Substreams tier1 authorize hosted-store requests using forwarded trusted identity headers instead of an end-user JWT (which is consumed upstream and never reaches tier1). Organization scoping via `--organization-id` still applies to the trusted `x-organization-id` header.
